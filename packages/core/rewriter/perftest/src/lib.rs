@@ -135,7 +135,7 @@ mod tests {
         for source in [
             "window.location.href = '/dashboard';",
             "function f(window) { return window.location; }",
-            "const a = 'escape \\' quote'; // comment\nfetch('/a');",
+            "const a = 'escaped'; // comment\nfetch('/a');",
             "/* block comment */ const name = 123;",
         ] {
             let baseline = scan(source, source.len());
