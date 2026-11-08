@@ -9,18 +9,21 @@
 let initialization = Promise.reject(new Error("worker not initialized"));
 initialization.catch(() => {}); // suppress rejection until a task awaits init
 let Session = null;
+let FullRewriter = null;
 
 async function initialize(glueUrl, wasmUrl) {
   if (!glueUrl || !wasmUrl) throw new Error("glueUrl and wasmUrl are required");
   const exports = await import(glueUrl);
-  if (typeof exports.PerftestRewriteSession !== "function") {
-    throw new Error("WASM not compiled with perftest feature");
+  if (typeof exports.PerftestRewriteSession !== "function" ||
+      typeof exports.Rewriter !== "function") {
+    throw new Error("WASM missing required perftest/Rewriter exports");
   }
   const response = await fetch(wasmUrl);
   if (!response.ok) throw new Error("Unable to fetch WASM: " + response.status);
   const bytes = await response.arrayBuffer();
   exports.initSync({ module: new WebAssembly.Module(bytes) });
   Session = exports.PerftestRewriteSession;
+  FullRewriter = exports.Rewriter;
 }
 
 self.addEventListener("message", async (event) => {
@@ -34,9 +37,29 @@ self.addEventListener("message", async (event) => {
   if (!Number.isSafeInteger(id)) return;
   try {
     await initialization;
-    const { source, options } = data.payload ?? {};
+    const { source, options, mode = "fast" } = data.payload ?? {};
     if (!(source instanceof Uint8Array)) throw new TypeError("source must be Uint8Array");
     if (!options) throw new TypeError("missing rewrite options");
+    if (mode === "full") {
+      const rewriter = new FullRewriter();
+      try {
+        const result = rewriter.rewrite_js_bytes(
+          options.jsconfig,
+          options.flags,
+          (url) => encodeURIComponent(url),
+          source,
+          options.base,
+          options.url,
+          options.isModule
+        );
+        const bytes = result.js.slice();
+        self.postMessage({ id, ok: true, result: bytes }, [bytes.buffer]);
+      } finally {
+        rewriter.free?.();
+      }
+      return;
+    }
+    if (mode !== "fast") throw new TypeError("Unknown rewrite mode");
     const scanner = new Session(
       options.wrapfn, options.propertybase, options.propertyfn,
       options.disableComputedWrap
