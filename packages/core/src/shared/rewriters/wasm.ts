@@ -19,9 +19,9 @@ const MAGIC = "\0asm".split("").map((x) => x.charCodeAt(0));
 
 function initWasm() {
 	// Do not recompile the identical module on every intercepted JS request.
-	if (initializedBytes === wasm_u8) return;
 	if (!(wasm_u8 instanceof Uint8Array))
 		throw new Error("rewriter wasm not found (was setWasm called?)");
+	if (initializedBytes === wasm_u8) return;
 
 	if (![...wasm_u8.slice(0, 4)].every((x, i) => x === MAGIC[i]))
 		throw new Error(
