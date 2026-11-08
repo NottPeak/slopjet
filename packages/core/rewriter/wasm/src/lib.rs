@@ -86,7 +86,9 @@ fn try_inert_output(js: &str, flags: &Flags, config: &Config) -> Result<Option<J
     if flags.do_sourcemaps || flags.capture_errors || flags.scramitize {
         return Ok(None);
     }
-    let fast = slopjet_perftest_scanner::program::rewrite_program(js, &config.wrapfn, &config.wrappropertybase);
+    let mut scanner = slopjet_perftest_scanner::stream::StreamingProgram::new(&config.wrapfn, &config.wrappropertybase);
+    scanner.write(js);
+    let fast = scanner.finish();
     if fast.is_none() && !slopjet_perftest_scanner::gate::identity_safe(js) {
         return Ok(None);
     }
@@ -203,5 +205,36 @@ impl PerftestScanSession {
             .ok_or_else(|| JsValue::from_str("session already finalized"))?
             .finish()
             .map_err(|error| JsValue::from_str(&format!("{error:?}")))
+    }
+}
+
+
+// Experimental incremental rewriting API; a null result means use OXC.
+// No output is returned until EOF, avoiding speculative output.
+#[cfg(feature = "perftest")]
+#[wasm_bindgen]
+pub struct PerftestRewriteSession {
+    scanner: Option<slopjet_perftest_scanner::stream::StreamingProgram>,
+}
+#[cfg(feature = "perftest")]
+#[wasm_bindgen]
+impl PerftestRewriteSession {
+    #[wasm_bindgen(constructor)]
+    pub fn new(wrapfn: String, propertybase: String) -> Self {
+        Self { scanner: Some(slopjet_perftest_scanner::stream::StreamingProgram::new(
+            wrapfn, propertybase
+        )) }
+    }
+    pub fn write(&mut self, chunk: &str) -> std::result::Result<(), JsValue> {
+        self.scanner.as_mut()
+            .ok_or_else(|| JsValue::from_str("rewrite session already finalized"))?
+            .write(chunk);
+        Ok(())
+    }
+    /// Returns null when the original OXC rewriter must handle the source.
+    pub fn finish(&mut self) -> std::result::Result<Option<String>, JsValue> {
+        Ok(self.scanner.take()
+            .ok_or_else(|| JsValue::from_str("rewrite session already finalized"))?
+            .finish())
     }
 }
