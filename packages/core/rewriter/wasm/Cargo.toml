@@ -20,4 +20,5 @@ web-sys = { version = "0.3.82", features = ["Url","UrlSearchParams"] }
 
 [features]
 default = ["debug"]
+perftest = []
 debug = ["js/debug"]
