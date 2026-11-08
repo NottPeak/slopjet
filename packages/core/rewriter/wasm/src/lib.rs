@@ -164,3 +164,39 @@ impl Rewriter {
 	}
 
 }
+
+#[cfg(feature = "perftest")]
+#[wasm_bindgen]
+pub struct PerftestScanSession {
+    scanner: Option<slopjet_perftest_scanner::deferred::DeferredScanner>,
+}
+
+#[cfg(feature = "perftest")]
+#[wasm_bindgen]
+impl PerftestScanSession {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { scanner: Some(slopjet_perftest_scanner::deferred::DeferredScanner::new()) }
+    }
+
+    /// Incrementally scan a fragment and return buffered counters.
+    /// Source may be split across lexical tokens, but each fragment must be UTF-8.
+    pub fn write(&mut self, chunk: &str) -> std::result::Result<JsValue, JsValue> {
+        let scanner = self.scanner.as_mut()
+            .ok_or_else(|| JsValue::from_str("session already finalized"))?;
+        let status = scanner.write(chunk);
+        let object = Object::new();
+        Reflect::set(&object, &"pendingBytes".into(), &(status.pending_bytes as f64).into())?;
+        Reflect::set(&object, &"pendingTokens".into(), &(status.pending_tokens as f64).into())?;
+        Reflect::set(&object, &"emittedBytes".into(), &(status.emitted_bytes as f64).into())?;
+        Ok(object.into())
+    }
+
+    /// Finalize the experimental lexical scanner. This is NOT a semantic rewrite.
+    pub fn finish(&mut self) -> std::result::Result<String, JsValue> {
+        self.scanner.take()
+            .ok_or_else(|| JsValue::from_str("session already finalized"))?
+            .finish()
+            .map_err(|error| JsValue::from_str(&format!("{error:?}")))
+    }
+}
