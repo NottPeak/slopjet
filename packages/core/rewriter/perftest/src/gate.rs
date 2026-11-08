@@ -63,3 +63,37 @@ mod tests {
         }
     }
 }
+
+/// AST-free transformation for a standalone unsafe-global expression.
+/// Preserves original whitespace and optional terminal semicolon. The only
+/// recognized syntax is one of the four names that the current OXC visitor
+/// wraps as IdentifierReference. Every other construct falls back to OXC.
+pub fn rewrite_simple_global(source: &str, wrapfn: &str) -> Option<String> {
+    let trimmed = source.trim();
+    let ident = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
+    if !matches!(ident, "location" | "parent" | "top" | "eval") {
+        return None;
+    }
+    let start = source.find(ident)?;
+    let end = start + ident.len();
+    let mut result = String::with_capacity(source.len() + wrapfn.len() + 2);
+    result.push_str(&source[..start]);
+    result.push_str(wrapfn);
+    result.push('(');
+    result.push_str(ident);
+    result.push(')');
+    result.push_str(&source[end..]);
+    Some(result)
+}
+#[cfg(test)]
+mod fast_path_tests {
+    use super::*;
+    #[test]
+    fn rewrites_only_standalone_globals() {
+        assert_eq!(rewrite_simple_global(" location; ", "$wrap"), Some(" $wrap(location); ".into()));
+        assert_eq!(rewrite_simple_global("top", "$wrap"), Some("$wrap(top)".into()));
+        assert_eq!(rewrite_simple_global("parent.location", "$wrap"), None);
+        assert_eq!(rewrite_simple_global("location = x", "$wrap"), None);
+        assert_eq!(rewrite_simple_global("function f(location){}", "$wrap"), None);
+    }
+}
