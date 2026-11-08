@@ -103,3 +103,10 @@ Not implemented: complete JS grammar and scope semantics, arbitrary safe scope
 release, entire JavaScript rewriting without OXC, live browser worker
 integration to the real Scramjet transport, and parity/fuzz benchmarks at scale.
 No toolchain compilation or CI outcome has been observed by the assistant.
+
+## Subsequent implementation progress
+- Added `perftest/src/edits.rs`: UTF-8-boundary-checked, ordered, source-preserving edit application with unit tests. This is infrastructure for future semantic transformations, not proof of semantic correctness.
+- Updated `wasm/src/lib.rs` to validate byte input as UTF-8 instead of using unchecked conversion.
+- The branch currently contains an opt-in `perftest` WASM feature and a narrow fast-path gate; do not treat it as a complete JS replacement.
+- Critical next work: lexical completeness (regex/template/Unicode), scope/declaration tracking, deferral barriers, transform parity against the OXC visitor, then per-request browser Web Worker integration.
+- No compiled test results or performance numbers are available from this session.
