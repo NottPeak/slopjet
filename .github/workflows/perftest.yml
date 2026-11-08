@@ -31,4 +31,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test experiments/perftest/browser-pool.test.mjs
+      - run: node --test experiments/perftest/*.test.mjs
