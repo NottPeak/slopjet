@@ -125,3 +125,121 @@ mod tests {
         }
     }
 }
+
+
+/// Narrow no-AST computed member expression fast path, e.g. obj[location].
+/// We support a single identifier/string/decimal index only. The visitor
+/// wraps dynamic keys with wrappropertyfn and separately wraps unsafe globals.
+/// All other grammar, particularly optional chains and assignment, falls back.
+pub fn rewrite_computed(
+    source: &str,
+    wrapfn: &str,
+    wrappropertyfn: &str,
+    disable_computed_wrap: bool,
+) -> Option<String> {
+    if !source.is_ascii() { return None; }
+    let bytes = source.as_bytes();
+    let mut pos = 0usize;
+    skip_ws(bytes, &mut pos);
+    let root = name(source, &mut pos)?;
+    if invalid_root(root.value) { return None; }
+    skip_ws(bytes, &mut pos);
+    if bytes.get(pos) != Some(&b'[') { return None; }
+    pos += 1;
+    skip_ws(bytes, &mut pos);
+    let key_start = pos;
+    let mut dynamic = false;
+    let mut key_is_unsafe_global = false;
+    let key_end;
+    match *bytes.get(pos)? {
+        b'\'' | b'"' => {
+            let quote = bytes[pos];
+            pos += 1;
+            let value_start = pos;
+            while pos < bytes.len() && bytes[pos] != quote {
+                if bytes[pos] == b'\\' || bytes[pos] == b'\r' || bytes[pos] == b'\n' {
+                    return None;
+                }
+                pos += 1;
+            }
+            if bytes.get(pos) != Some(&quote) { return None; }
+            let value = &source[value_start..pos];
+            pos += 1;
+            dynamic = unsafe_property(value);
+            key_end = pos;
+        }
+        b'0'..=b'9' => {
+            while bytes.get(pos).is_some_and(|v| v.is_ascii_digit()) { pos += 1; }
+            key_end = pos;
+        }
+        _ => {
+            let key = name(source, &mut pos)?;
+            dynamic = !matches!(key.value, "true" | "false" | "null");
+            key_is_unsafe_global = unsafe_property(key.value);
+            key_end = pos;
+        }
+    }
+    skip_ws(bytes, &mut pos);
+    if bytes.get(pos) != Some(&b']') { return None; }
+    pos += 1;
+    skip_ws(bytes, &mut pos);
+    if bytes.get(pos) == Some(&b';') {
+        pos += 1;
+        skip_ws(bytes, &mut pos);
+    }
+    if pos != bytes.len() { return None; }
+
+    let root_value = if unsafe_property(root.value) {
+        format!("{wrapfn}({})", root.value)
+    } else {
+        root.value.to_string()
+    };
+    let raw_key = &source[key_start..key_end];
+    let key_value = if key_is_unsafe_global {
+        format!("{wrapfn}({raw_key})")
+    } else {
+        raw_key.to_string()
+    };
+    let key_value = if dynamic && !disable_computed_wrap {
+        format!("{wrappropertyfn}(({key_value}))")
+    } else {
+        key_value
+    };
+    let mut result = String::with_capacity(source.len() + 64);
+    result.push_str(&source[..root.start]);
+    result.push_str(&root_value);
+    result.push_str(&source[root.end..key_start]);
+    result.push_str(&key_value);
+    result.push_str(&source[key_end..]);
+    Some(result)
+}
+#[cfg(test)]
+mod computed_tests {
+    use super::*;
+    #[test]
+    fn safe_computed_expressions() {
+        assert_eq!(
+            rewrite_computed("window[location];", "$w", "$p", false),
+            Some("window[$p(($w(location)))];".into())
+        );
+        assert_eq!(
+            rewrite_computed("top [\"location\"] ;", "$w", "$p", false),
+            Some("$w(top) [$p((\"location\"))] ;".into())
+        );
+        assert_eq!(
+            rewrite_computed("obj[\"unrelated\"];", "$w", "$p", false),
+            Some("obj[\"unrelated\"];".into())
+        );
+        assert_eq!(
+            rewrite_computed("obj[foo]", "$w", "$p", true),
+            Some("obj[foo]".into())
+        );
+    }
+    #[test]
+    fn unsupported_computed_syntax_falls_back() {
+        for source in ["obj[f()]", "obj[a+b]", "obj[foo].location",
+            "obj?.[foo]", "obj[foo] = 1", "obj['escaped\\'s']"] {
+            assert!(rewrite_computed(source, "$w", "$p", false).is_none());
+        }
+    }
+}
