@@ -3,6 +3,8 @@ on:
   push:
     branches: [perftest]
   workflow_dispatch:
+  pull_request:
+    branches: [main]
 jobs:
   rust:
     runs-on: ubuntu-latest
