@@ -35,7 +35,8 @@ fn oxc_output(source: &str) -> String {
         destructure_rewrites: false,
     };
     let allocator = Allocator::default();
-    let out = Rewriter::new().rewrite(&allocator, source, config, flags, &NoopUrls).unwrap();
+    let rewriter = Rewriter::new();
+    let out = rewriter.rewrite(&allocator, source, config, flags, &NoopUrls).unwrap();
     String::from_utf8(out.js.as_slice().to_vec()).unwrap()
 }
 #[test]
