@@ -86,7 +86,7 @@ fn try_inert_output(js: &str, flags: &Flags, config: &Config) -> Result<Option<J
     if flags.do_sourcemaps || flags.capture_errors || flags.scramitize {
         return Ok(None);
     }
-    let fast = slopjet_perftest_scanner::simple::rewrite(js, &config.wrapfn, &config.wrappropertybase);
+    let fast = slopjet_perftest_scanner::program::rewrite_program(js, &config.wrapfn, &config.wrappropertybase);
     if fast.is_none() && !slopjet_perftest_scanner::gate::identity_safe(js) {
         return Ok(None);
     }
