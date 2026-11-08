@@ -70,16 +70,20 @@ export type PerftestRewriteSessionLike = {
 };
 export function createPerftestRewriteSession(
     wrapfn: string,
-    propertybase: string
+    propertybase: string,
+    propertyfn: string,
+    disableComputedWrap: boolean
 ): PerftestRewriteSessionLike | null {
     const exports = WasmExports as unknown as {
         PerftestRewriteSession?: new (
             wrapfn: string,
-            propertybase: string
+            propertybase: string,
+            propertyfn: string,
+            disableComputedWrap: boolean
         ) => PerftestRewriteSessionLike
     };
     const Constructor = exports.PerftestRewriteSession;
     if (typeof Constructor !== "function") return null;
     initWasm();
-    return new Constructor(wrapfn, propertybase);
+    return new Constructor(wrapfn, propertybase, propertyfn, disableComputedWrap);
 }
