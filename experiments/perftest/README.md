@@ -63,10 +63,16 @@ Example (paths are deployment-specific):
     });
     // On app shutdown: pool.close();
 
-The page-hosted pool only runs the AST-free safe subset. Unsupported sources
-or failed Worker requests fall back to the original OXC rewrite on the
-controller thread. It does not require passing arbitrary codec functions
-across worker boundaries.
+The page-hosted pool runs a complete OXC/WASM rewrite for external JavaScript
+when the Controller uses Scramjet's default encodeURIComponent URL codec.
+Every dedicated browser Worker has its own persistent OXC/WASM Rewriter
+instance, so independent requests can execute concurrently, including scripts
+not in the AST-free subset. With a customized URL codec, the optional worker
+pool is limited to the conservative AST-free subset; other scripts fall back
+to the controller's OXC rewrite. Worker failures also fall back locally.
+The service worker still cannot spawn Workers itself, so the controller
+window owns the pool. Worker JS processing is not automatically enabled and
+must be explicitly configured with perftestWorkers.
 
 ## Tests
 
@@ -76,7 +82,7 @@ across worker boundaries.
     cargo run --release -p slopjet-perftest-scanner --example oxc_compare -- 1000
     cargo run --release -p slopjet-perftest-scanner --example throughput -- 200
     cd ../../..
-    node --test experiments/perftest/browser-pool.test.mjs
+    node --test experiments/perftest/*.test.mjs
 
 The draft PR (#1) activates Rust, WASM, OXC parity and browser pool CI.
 
