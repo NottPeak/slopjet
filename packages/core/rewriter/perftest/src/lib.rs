@@ -2,6 +2,7 @@
 //! This stage separates lexical spans; ambiguous syntax is never rewritten.
 pub mod deferred;
 pub mod requests;
+pub mod gate;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind { Identifier, Space, String, Comment, Punctuation }
 #[derive(Debug, Clone, PartialEq, Eq)]
