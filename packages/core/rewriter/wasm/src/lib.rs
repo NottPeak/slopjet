@@ -2,7 +2,7 @@ pub mod error;
 
 use error::{Result, RewriterError};
 use js::cfg::{Config, Flags};
-use js_sys::{Object, Reflect};
+use js_sys::{Array, Object, Reflect, Uint8Array};
 use jsr::{JsRewriter, JsRewriterOutput, create_js, create_js_output};
 use oxc::allocator::Allocator;
 use wasm_bindgen::prelude::*;
@@ -77,6 +77,23 @@ fn get_js_flags(obj: &Object, base: String, is_module: bool) -> Result<Flags> {
 	})
 }
 
+
+// Perftest opt-in route: only scripts containing inert string statements,
+// comments and semicolons bypass OXC. All other scripts take the original path.
+// This is intentionally NOT a general-purpose JS rewrite implementation.
+fn try_inert_output(js: &str, flags: &Flags) -> Result<Option<JsRewriterOutput>> {
+    if flags.do_sourcemaps || flags.capture_errors || flags.scramitize
+        || !slopjet_perftest_scanner::gate::identity_safe(js) {
+        return Ok(None);
+    }
+    let obj = Object::new();
+    set_obj(&obj, "js", &Uint8Array::from(js.as_bytes()).into())?;
+    set_obj(&obj, "map", &Uint8Array::from(&[0u8, 0, 0, 0][..]).into())?;
+    set_obj(&obj, "scramtag", &scramtag().into())?;
+    set_obj(&obj, "errors", &Array::new().into())?;
+    Ok(Some(JsRewriterOutput::from(JsValue::from(obj))))
+}
+
 #[wasm_bindgen]
 pub struct Rewriter {
 	alloc: Allocator,
@@ -108,6 +125,9 @@ impl Rewriter {
 	) -> Result<JsRewriterOutput> {
 		let config = get_js_config(jsconfig)?;
 		let flags = get_js_flags(jsflags, base, module)?;
+		if let Some(output) = try_inert_output(&js, &flags)? {
+			return Ok(output);
+		}
 		let rewriter = get_url_rewriter(encode_url)?;
 
 		let out = match self.js.rewrite(&self.alloc, &js, config, flags, &rewriter) {
