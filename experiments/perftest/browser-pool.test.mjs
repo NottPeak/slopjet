@@ -4,7 +4,7 @@ import { RequestPool } from "./browser-pool.mjs";
 
 class MockWorker {
   constructor() {
-    this.handlers = { message: [], error: [] };
+    this.handlers = { message: [], error: [], messageerror: [] };
     this.closed = false;
   }
   addEventListener(name, handler) { this.handlers[name].push(handler); }
