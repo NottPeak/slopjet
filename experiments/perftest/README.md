@@ -60,3 +60,29 @@ No performance claims are made until measured. This document is a plan, not a co
 - Benchmarks have not been executed in this environment.
 
 Do not enable the prototype for real page rewriting yet. It returns original source for supported lexemes and errors on unsupported syntax; it is not a drop-in Scramjet rewriter.
+
+## Executable WASM integration update (2026-11-08)
+
+The experimental Rust crate is now imported by the WASM rewrite crate.
+An explicit Cargo feature named perftest enables a deliberately narrow
+AST-free identity path for inert string statements, semicolons and comments.
+Everything else still uses OXC. The feature is off by default.
+
+This is not a general-purpose streaming semantic rewrite replacement.
+Complex constructs including computed members, destructuring, imports,
+and globals still require the original OXC visitor.
+
+Native requests can be independently processed through the bounded pool
+in perftest/src/requests.rs, with throughput benchmark in examples/throughput.rs.
+Browser concurrency requires a separate Web Worker scheduler and instances.
+Neither browser scheduling nor scope-aware early release is live yet.
+
+Testing commands (not executed here; Cargo is unavailable):
+
+    cd packages/core/rewriter
+    cargo test -p slopjet-perftest-scanner
+    cargo run --release -p slopjet-perftest-scanner --example throughput -- 10000
+    cargo check -p wasm --features perftest --target wasm32-unknown-unknown
+
+Run full OXC differential tests before increasing fast-path coverage.
+No performance or correctness results have yet been verified.
