@@ -37,7 +37,9 @@ export async function rewriteJsResponse(
 
     const session = createPerftestRewriteSession(
         context.config.globals.wrapfn,
-        context.config.globals.wrappropertybase
+        context.config.globals.wrappropertybase,
+        context.config.globals.wrappropertyfn,
+        flagEnabled("disableComputedWrap", context, meta.base)
     );
     if (!session || !response.body) {
         return rewriteJs(
