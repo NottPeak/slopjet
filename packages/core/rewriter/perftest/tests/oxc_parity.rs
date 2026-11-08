@@ -105,3 +105,39 @@ fn computed_member_fast_path_matches_oxc() {
         assert_eq!(oxc_output(source), fast, "{source:?}");
     }
 }
+
+#[test]
+fn generated_member_chain_corpus_matches_oxc() {
+    let roots = ["window", "top", "parent", "location", "eval", "document", "obj", "this"];
+    let props = ["location", "parent", "top", "eval", "href", "cookie", "ownerDocument"];
+    for (i, root) in roots.iter().enumerate() {
+        for (j, prop) in props.iter().enumerate() {
+            for (k, tail) in props.iter().enumerate() {
+                let input = if (i + j + k) % 2 == 0 {
+                    format!("{root}.{prop}.{tail};")
+                } else {
+                    format!(" {root} . {prop} . {tail} ; ")
+                };
+                let fast = slopjet_perftest_scanner::simple::rewrite(
+                    &input, "$wrap", "$property$"
+                ).expect("valid member chain must be recognized");
+                assert_eq!(oxc_output(&input), fast, "{input:?}");
+            }
+        }
+    }
+}
+#[test]
+fn generated_computed_member_corpus_matches_oxc() {
+    let roots = ["window", "top", "parent", "location", "obj", "this"];
+    let keys = ["location", "parent", "top", "eval", "key", "undefined",
+        "true", "false", "null", "\"location\"", "\"other\"", "0", "7"];
+    for root in roots {
+        for key in keys {
+            let input = format!("{root}[{key}];");
+            let fast = slopjet_perftest_scanner::simple::rewrite_computed(
+                &input, "$wrap", "$wrapProperty", false
+            ).expect("valid single-index expression must be recognized");
+            assert_eq!(oxc_output(&input), fast, "{input:?}");
+        }
+    }
+}
