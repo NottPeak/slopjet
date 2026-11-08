@@ -1,112 +1,121 @@
-# perftest: streaming semantic rewriting experiment
+# Slopjet `perftest`: Rust/WASM deferred scanner and request-level concurrency
 
-This branch is experimental. The production OXC/WASM rewrite path remains untouched until a replacement is proven equivalent on a defined corpus.
+**Status: working feature-gated experiment with OXC fallback; NOT a full no-AST
+replacement of Scramjet's JavaScript grammar and transformations.**
 
-## Goal
-Build a stateful, incremental JavaScript rewriting engine which can retain lexical, grammatical and scope context across arbitrarily split input, emit patches rather than regenerate entire source files, and eventually parallelize *independent* regions without compromising semantics.
+## Design
 
-## Current upstream integration points
-- `packages/core/src/shared/rewriters/js.ts`: OXC/WASM delegation; eventual feature-flagged dispatch / fallback.
-- `packages/core/src/shared/rewriters/html.ts`: separate HTML streaming work, not part of the JS lexer.
-- `packages/core/src/fetch/body.ts`: currently buffers JS and HTML responses.
-- Existing Rust rewrite implementation and its tests: source of transformation truth, not just syntax examples.
+1. Rust/WASM is the execution engine. StreamingProgram accepts chunks in
+   one forward pass and retains state across chunk boundaries.
+2. All output is deferred until EOF. A supported whole-file subset emits
+   source-preserving rewrites; unsupported syntax gets the original OXC
+   parser/visitor. No irreversible speculative output is permitted.
+3. Safe subset: inert string/comment statements, standalone unsafe globals,
+   static member chains, and narrow computed member expressions with
+   identifier, literal-string or decimal indices. It honors
+   disableComputedWrap. Calls, assignments, imports, declarations, complex
+   expression grammar, template literals, regexp ambiguity, etc. fall back.
+4. Worker parallelism is across independent requests, NEVER file chunks.
+   Worker count is configurable or derived from hardware concurrency.
+   One user/request never shares scanner state with another.
+5. Inline scripts and synchronous rewriting continue to use the WASM
+   entry point with the same optional fast path and OXC fallback.
 
-## Design constraints
-1. Byte-chunk boundaries must never change output or decisions.
-2. Strings, comments, regexp literals, template strings/interpolations, and nested scopes require persistent state.
-3. Scope resolution must account for declarations seen later (hoisting / lexical shadowing). Defer decisions or use a scope prepass; never assume a name is global from its spelling alone.
-4. Preserve source text outside targeted patches. Use ordered, non-overlapping source offsets for edits.
-5. Maintain source maps and strict-directive semantics where enabled.
-6. A parser/AST fallback remains necessary for unsupported cases during rollout.
-7. No arbitrary chunks to independent workers: dispatch only after determining safe syntactic boundaries and dependencies.
-8. Concurrency is a measured optimization, not an architectural prerequisite.
-9. Benchmark correctness *before* speed; report warmed/cold startup, byte throughput, allocations, and time-to-first-output separately.
-10. Never silently use a partial transform on syntax the prototype cannot understand.
+## Build and use
 
-## Proposed milestones
-- M0: baseline fixtures and differential test runner, measuring existing rewriter.
-- M1: resumable lexical scanner + token/span output, with adversarial chunk-boundary tests.
-- M2: grammar/scope tracking + safe-emission barrier + patch application.
-- M3: Scramjet transform parity + OXC fallback and feature flag.
-- M4: response streaming & backpressure.
-- M5: bounded task pool for independently rewritable regions, only if profiling shows benefits.
+With the documented Rust nightly, wasm-bindgen, wasm-opt and wasm-snip toolchain:
 
-## Open architecture decisions
-- Implement the core in Rust/WASM alongside the current OXC rewriter, or first prototype in TypeScript for iteration speed?
-- Require full Scramjet rewrite parity before enabling the feature flag on live sites, or allow explicitly opt-in partial support with automatic fallback?
-- Should HTML streaming be a separate benchmark track after the JavaScript semantic engine?
+    cd packages/core
+    FEATURES=perftest pnpm rewriter:build
+    pnpm build
 
-No performance claims are made until measured. This document is a plan, not a completed engine.
+Default builds without the perftest Cargo feature retain the OXC path.
+External JS fetches use the incremental scanner when the feature is present;
+failed or unrecognized cases use OXC with the original bytes.
 
-## Architecture decision log (2026-11-08)
-- Core language: Rust, with eventual wasm32 target.
-- One forward lexical pass with deferred emission; no mandatory pre-scan.
-- Concurrency is **across independent requests**, not across arbitrary chunks of a single source.
-- Native benchmark worker count is configurable; browser deployment will require Web Worker scheduling and independent WASM instances.
-- Per-request state must never be shared between users or requests.
+## Optional browser worker pool
 
-## Implemented in this branch
-- `perftest/src/lib.rs`: conservative incremental lexical scanner.
-- `perftest/src/deferred.rs`: deferred source coordinator (currently holds through EOF).
-- `perftest/src/requests.rs`: native bounded independent-request pool and sequential wasm32 fallback.
-- `perftest/examples/throughput.rs`: standalone throughput comparison, **not OXC**.
+Scramjet's controller can handle fetches in a window context. Its Controller
+constructor now accepts `perftestWorkers: pool` to opt in to browser Workers.
+ServiceWorkerGlobalScope cannot construct Worker instances, so the service
+worker keeps a local OXC path unless a client-hosted broker is in use.
 
-## Not implemented / unverified
-- JavaScript grammar, scope resolution, and actual rewrite operations.
-- Streaming safe-release barriers and forward-binding resolution.
-- Regexp/template/Unicode complete lexical support.
-- wasm-bindgen exports and browser Web Worker pool.
-- Integration into Scramjet's active rewrite path or OXC differential correctness tests.
-- Benchmarks have not been executed in this environment.
+Serve these assets on your origin:
 
-Do not enable the prototype for real page rewriting yet. It returns original source for supported lexemes and errors on unsupported syntax; it is not a drop-in Scramjet rewriter.
+- experiments/perftest/browser-pool.mjs
+- experiments/perftest/wasm-worker.mjs
+- experiments/perftest/create-pool.mjs
+- the wasm-bindgen generated wasm.js glue script with perftest exports
+- the corresponding scramjet.wasm binary
 
-## Executable WASM integration update (2026-11-08)
+Example (paths are deployment-specific):
 
-The experimental Rust crate is now imported by the WASM rewrite crate.
-An explicit Cargo feature named perftest enables a deliberately narrow
-AST-free identity path for inert string statements, semicolons and comments.
-Everything else still uses OXC. The feature is off by default.
+    import { createPerftestPool } from '/perftest/create-pool.mjs';
+    const pool = createPerftestPool({
+      wasmGlueUrl: '/perftest/wasm.js',
+      wasmUrl: '/scramjet/scramjet.wasm',
+      workers: Math.max(1, Math.floor(navigator.hardwareConcurrency / 2)),
+    });
+    const controller = new Controller({
+      serviceworker, transport, perftestWorkers: pool,
+    });
+    // On app shutdown: pool.close();
 
-This is not a general-purpose streaming semantic rewrite replacement.
-Complex constructs including computed members, destructuring, imports,
-and globals still require the original OXC visitor.
+The page-hosted pool only runs the AST-free safe subset. Unsupported sources
+or failed Worker requests fall back to the original OXC rewrite on the
+controller thread. It does not require passing arbitrary codec functions
+across worker boundaries.
 
-Native requests can be independently processed through the bounded pool
-in perftest/src/requests.rs, with throughput benchmark in examples/throughput.rs.
-Browser concurrency requires a separate Web Worker scheduler and instances.
-Neither browser scheduling nor scope-aware early release is live yet.
-
-Testing commands (not executed here; Cargo is unavailable):
+## Tests
 
     cd packages/core/rewriter
     cargo test -p slopjet-perftest-scanner
-    cargo run --release -p slopjet-perftest-scanner --example throughput -- 10000
     cargo check -p wasm --features perftest --target wasm32-unknown-unknown
+    cargo run --release -p slopjet-perftest-scanner --example oxc_compare -- 1000
+    cargo run --release -p slopjet-perftest-scanner --example throughput -- 200
+    cd ../../..
+    node --test experiments/perftest/browser-pool.test.mjs
 
-Run full OXC differential tests before increasing fast-path coverage.
-No performance or correctness results have yet been verified.
+The draft PR (#1) activates Rust, WASM, OXC parity and browser pool CI.
 
-## Latest implemented subset
+## Observed GitHub Actions measurements
 
-- Feature-gated WASM rewrite entry point bypasses OXC only for proven inert
-  string/comment statements and a very narrow single bare-global expression
-  (location, parent, top, eval) wrapped with the configured function.
-- The Rust perftest crate exports an incremental scan session via wasm-bindgen.
-- An experimental browser Web Worker pool provides configurable request-level
-  scheduling, isolation, queue limits, and ordered promise delivery.
-- A Rust differential test compares fast-path output against the real OXC
-  visitor, with native concurrency tests and browser pool Node tests.
-- GitHub Actions perftest workflow added to compile Rust/WASM and execute tests.
+Prior passing CI run 42519669174 (small synthetic fixtures; not live sites):
 
-Not implemented: complete JS grammar and scope semantics, arbitrary safe scope
-release, entire JavaScript rewriting without OXC, live browser worker
-integration to the real Scramjet transport, and parity/fuzz benchmarks at scale.
-No toolchain compilation or CI outcome has been observed by the assistant.
+| Test | AST-free / OXC ratio |
+| --- | ---: |
+| Single member expression | 3.02x |
+| Multi-statement | 1.63x |
+| Member chains | 1.79x |
 
-## Subsequent implementation progress
-- Added `perftest/src/edits.rs`: UTF-8-boundary-checked, ordered, source-preserving edit application with unit tests. This is infrastructure for future semantic transformations, not proof of semantic correctness.
-- Updated `wasm/src/lib.rs` to validate byte input as UTF-8 instead of using unchecked conversion.
-- The branch currently contains an opt-in `perftest` WASM feature and a narrow fast-path gate; do not treat it as a complete JS replacement.
-- Critical next work: lexical completeness (regex/template/Unicode), scope/declaration tracking, deferral barriers, transform parity against the OXC visitor, then per-request browser Web Worker integration.
-- No compiled test results or performance numbers are available from this session.
+Separate native lexer throughput run (200 requests, 940,000 bytes):
+
+| Workers | Throughput MiB/s |
+| --- | ---: |
+| Sequential | 46.25 |
+| 1 | 30.82 |
+| 2 | 55.54 |
+| 4 | 64.62 |
+| 8 | 63.02 |
+
+These figures do not predict real-world site performance or linear speedup.
+Actual rewrite coverage, browser worker overhead, and time-to-first-byte
+must be profiled on representative JavaScript and HTML corpora.
+
+## Remaining incompatibilities / blockers
+
+- Full ECMAScript lexical grammar, binding/scope resolution, destructuring,
+  dynamic imports, assignment operators, eval, new, postMessage, import.meta,
+  special flag transforms, and complete sourcemap parity are NOT implemented
+  in the AST-free path. OXC handles them.
+- The fast path's forward scan does not produce a complete grammar or AST,
+  and it does not resolve shadowing. It safely declines unsupported files.
+- Network rewriting still buffers output until EOF to ensure fallback.
+  The original HTML rewrite path is unchanged.
+- Browser Worker mode requires a live Controller window and hosted glue/assets;
+  it is not automatically enabled by building with the perftest feature.
+- Production deployment is not recommended until complete differential corpus
+  and browser compatibility testing have been performed.
+
+Main branch has not been modified. Draft PR must not be merged as production
+optimization without further validation.
