@@ -35,13 +35,18 @@ export async function rewriteJsResponse(
         );
     }
 
-    const session = createPerftestRewriteSession(
-        context.config.globals.wrapfn,
-        context.config.globals.wrappropertybase,
-        context.config.globals.wrappropertyfn,
-        flagEnabled("disableComputedWrap", context, meta.base)
+    const options = {
+        wrapfn: context.config.globals.wrapfn,
+        propertybase: context.config.globals.wrappropertybase,
+        propertyfn: context.config.globals.wrappropertyfn,
+        disableComputedWrap: flagEnabled("disableComputedWrap", context, meta.base),
+    };
+    const parallel = context.interface.rewriteJsFastAsync;
+    const session = parallel ? null : createPerftestRewriteSession(
+        options.wrapfn, options.propertybase,
+        options.propertyfn, options.disableComputedWrap
     );
-    if (!session || !response.body) {
+    if ((!parallel && !session) || !response.body) {
         return rewriteJs(
             new Uint8Array(await response.arrayBuffer()),
             source,
@@ -62,9 +67,9 @@ export async function rewriteJsResponse(
             if (done) break;
             chunks.push(value);
             total += value.byteLength;
-            session.write(decoder.decode(value, { stream: true }));
+            if (session) session.write(decoder.decode(value, { stream: true }));
         }
-        session.write(decoder.decode());
+        if (session) session.write(decoder.decode());
     } finally {
         reader.releaseLock();
     }
@@ -77,7 +82,18 @@ export async function rewriteJsResponse(
         offset += part.byteLength;
     }
 
-    const fast = session.finish();
+    let fast: string | null = null;
+    if (parallel) {
+        try {
+            // Keep original intact in case the worker rejects or cannot
+            // recognize this source; its bytes are needed for OXC fallback.
+            fast = await parallel(original.slice(), options);
+        } catch {
+            fast = null;
+        }
+    } else {
+        fast = session!.finish();
+    }
     if (fast !== null) {
         return new TextEncoder().encode(fast);
     }
