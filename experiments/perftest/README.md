@@ -26,10 +26,12 @@ replacement of Scramjet's JavaScript grammar and transformations.**
 With the documented Rust nightly, wasm-bindgen, wasm-opt and wasm-snip toolchain:
 
     cd packages/core
-    FEATURES=perftest pnpm rewriter:build
+    pnpm rewriter:build
     pnpm build
 
-Default builds without the perftest Cargo feature retain the OXC path.
+On this experimental branch, the build script enables the perftest Cargo
+feature by default. Run PERFTEST=0 pnpm rewriter:build to build the unchanged
+OXC-only baseline. The WASM build cache includes the feature selection.
 External JS fetches use the incremental scanner when the feature is present;
 failed or unrecognized cases use OXC with the original bytes.
 
