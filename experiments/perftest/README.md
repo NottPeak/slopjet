@@ -86,3 +86,20 @@ Testing commands (not executed here; Cargo is unavailable):
 
 Run full OXC differential tests before increasing fast-path coverage.
 No performance or correctness results have yet been verified.
+
+## Latest implemented subset
+
+- Feature-gated WASM rewrite entry point bypasses OXC only for proven inert
+  string/comment statements and a very narrow single bare-global expression
+  (location, parent, top, eval) wrapped with the configured function.
+- The Rust perftest crate exports an incremental scan session via wasm-bindgen.
+- An experimental browser Web Worker pool provides configurable request-level
+  scheduling, isolation, queue limits, and ordered promise delivery.
+- A Rust differential test compares fast-path output against the real OXC
+  visitor, with native concurrency tests and browser pool Node tests.
+- GitHub Actions perftest workflow added to compile Rust/WASM and execute tests.
+
+Not implemented: complete JS grammar and scope semantics, arbitrary safe scope
+release, entire JavaScript rewriting without OXC, live browser worker
+integration to the real Scramjet transport, and parity/fuzz benchmarks at scale.
+No toolchain compilation or CI outcome has been observed by the assistant.
