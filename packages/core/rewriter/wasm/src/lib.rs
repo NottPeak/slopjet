@@ -78,6 +78,7 @@ fn get_js_flags(obj: &Object, base: String, is_module: bool) -> Result<Flags> {
 }
 
 
+#[cfg(feature = "perftest")]
 // Perftest opt-in route: only scripts containing inert string statements,
 // comments and semicolons bypass OXC. All other scripts take the original path.
 // This is intentionally NOT a general-purpose JS rewrite implementation.
@@ -125,6 +126,7 @@ impl Rewriter {
 	) -> Result<JsRewriterOutput> {
 		let config = get_js_config(jsconfig)?;
 		let flags = get_js_flags(jsflags, base, module)?;
+		#[cfg(feature = "perftest")]
 		if let Some(output) = try_inert_output(&js, &flags)? {
 			return Ok(output);
 		}
