@@ -58,6 +58,7 @@ export async function rewriteJsResponse(
 
     const chunks: Uint8Array[] = [];
     let total = 0;
+    let fastScanFailed = false;
     // TextDecoder stream mode preserves multibyte UTF-8 across ReadableStream chunks.
     const decoder = new TextDecoder("utf-8");
     const reader = response.body.getReader();
@@ -65,11 +66,21 @@ export async function rewriteJsResponse(
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            chunks.push(value);
+            // Snapshot chunks before an underlying transport can reuse its buffer.
+            chunks.push(value.slice());
             total += value.byteLength;
-            if (session) session.write(decoder.decode(value, { stream: true }));
+            if (session && !fastScanFailed) {
+                try {
+                    session.write(decoder.decode(value, { stream: true }));
+                } catch {
+                    fastScanFailed = true;
+                }
+            }
         }
-        if (session) session.write(decoder.decode());
+        if (session && !fastScanFailed) {
+            try { session.write(decoder.decode()); }
+            catch { fastScanFailed = true; }
+        }
     } finally {
         reader.releaseLock();
     }
@@ -91,8 +102,9 @@ export async function rewriteJsResponse(
         } catch {
             fast = null;
         }
-    } else {
-        fast = session!.finish();
+    } else if (!fastScanFailed) {
+        try { fast = session!.finish(); }
+        catch { fast = null; }
     }
     if (fast !== null) {
         return new TextEncoder().encode(fast);
