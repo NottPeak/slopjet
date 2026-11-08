@@ -35,6 +35,32 @@ export async function rewriteJsResponse(
         );
     }
 
+    // When a compatible page-hosted worker pool is available, rewrite the
+    // *complete* script in a dedicated Worker. Each Worker runs a separate
+    // OXC/WASM instance; this scales concurrent users even if a script cannot
+    // take the AST-free scanner's narrow fast path.
+    const fullParallel = context.interface.rewriteJsFullAsync;
+    if (fullParallel) {
+        const original = new Uint8Array(await response.arrayBuffer());
+        const flags = { ...context.config.flags };
+        for (const key of Object.keys(flags) as (keyof typeof flags)[]) {
+            flags[key] = flagEnabled(key, context, meta.base);
+        }
+        try {
+            return await fullParallel(original.slice(), {
+                jsconfig: { ...context.config.globals, prefix: context.prefix.pathname },
+                flags,
+                base: meta.base.href,
+                url: source || "(unknown)",
+                isModule,
+            });
+        } catch {
+            // Worker crash, initialization failure, or codec incompatibility:
+            // OXC is still available locally with the original source bytes.
+            return rewriteJs(original, source, context, meta, isModule);
+        }
+    }
+
     const options = {
         wrapfn: context.config.globals.wrapfn,
         propertybase: context.config.globals.wrappropertybase,
