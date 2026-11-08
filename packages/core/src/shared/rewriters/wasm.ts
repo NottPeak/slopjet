@@ -71,6 +71,7 @@ export function getRewriter(
 export type PerftestRewriteSessionLike = {
     write(chunk: string): void;
     finish(): string | null;
+    free?(): void;
 };
 export function createPerftestRewriteSession(
     wrapfn: string,
