@@ -5,7 +5,10 @@ shopt -s inherit_errexit
 # Experimental perftest branch: enable the Rust scan fast path for normal builds.
 # Set PERFTEST=0 to produce the unchanged OXC-only baseline.
 if [ "${PERFTEST:-1}" = "1" ]; then
-    FEATURES="${FEATURES:+${FEATURES},}perftest"
+    case ",${FEATURES:-}," in
+        *,perftest,*) ;;
+        *) FEATURES="${FEATURES:+${FEATURES},}perftest" ;;
+    esac
 fi
 
 
