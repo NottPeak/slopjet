@@ -10,6 +10,7 @@ let initialization = Promise.reject(new Error("worker not initialized"));
 initialization.catch(() => {}); // suppress rejection until a task awaits init
 let Session = null;
 let FullRewriter = null;
+let rewriterInstance = null;
 
 async function initialize(glueUrl, wasmUrl) {
   if (!glueUrl || !wasmUrl) throw new Error("glueUrl and wasmUrl are required");
@@ -24,6 +25,7 @@ async function initialize(glueUrl, wasmUrl) {
   exports.initSync({ module: new WebAssembly.Module(bytes) });
   Session = exports.PerftestRewriteSession;
   FullRewriter = exports.Rewriter;
+  rewriterInstance = new FullRewriter();
 }
 
 self.addEventListener("message", async (event) => {
@@ -41,22 +43,19 @@ self.addEventListener("message", async (event) => {
     if (!(source instanceof Uint8Array)) throw new TypeError("source must be Uint8Array");
     if (!options) throw new TypeError("missing rewrite options");
     if (mode === "full") {
-      const rewriter = new FullRewriter();
-      try {
-        const result = rewriter.rewrite_js_bytes(
-          options.jsconfig,
-          options.flags,
-          (url) => encodeURIComponent(url),
-          source,
-          options.base,
-          options.url,
-          options.isModule
-        );
-        const bytes = result.js.slice();
-        self.postMessage({ id, ok: true, result: bytes }, [bytes.buffer]);
-      } finally {
-        rewriter.free?.();
-      }
+      // Each dedicated Worker owns its own reusable OXC/WASM instance.
+      // The WASM wrapper resets its allocator after every rewrite.
+      const result = rewriterInstance.rewrite_js_bytes(
+        options.jsconfig,
+        options.flags,
+        (url) => encodeURIComponent(url),
+        source,
+        options.base,
+        options.url,
+        options.isModule
+      );
+      const bytes = result.js.slice();
+      self.postMessage({ id, ok: true, result: bytes }, [bytes.buffer]);
       return;
     }
     if (mode !== "fast") throw new TypeError("Unknown rewrite mode");
