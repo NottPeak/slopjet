@@ -52,7 +52,7 @@ fn main() {
         ("member-chain", "window.location.href; this.location; parent.top;"),
     ];
     for (name, input) in samples {
-        let allocator = Allocator::default();
+        let mut allocator = Allocator::default();
         let rewriter = Rewriter::new();
         let baseline = rewriter.rewrite(&allocator, input, config(), flags(), &Noop)
             .expect("OXC baseline");
