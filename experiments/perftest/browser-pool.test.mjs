@@ -45,3 +45,61 @@ test("backpressure rejects when queue is full", async () => {
   assert.equal(await first, 2);
   pool.close();
 });
+
+
+test("replaces a crashed worker and continues processing other users", async () => {
+  let starts = 0;
+  let previous = null;
+  class CrashableWorker extends MockWorker {
+    postMessage({ id, payload }) {
+      if (payload === "crash") {
+        queueMicrotask(() => {
+          for (const fn of this.handlers.error) fn({ message: "worker crashed" });
+        });
+        return;
+      }
+      super.postMessage({ id, payload });
+    }
+  }
+  const pool = new RequestPool({
+    workers: 1,
+    workerFactory: () => {
+      starts++;
+      previous = new CrashableWorker();
+      return previous;
+    },
+  });
+  await assert.rejects(pool.submit("crash"), /crashed/);
+  assert.ok(previous && starts > 1);
+  assert.equal(await pool.submit(21), 42);
+  pool.close();
+});
+
+test("ignores stale messages after a worker has been replaced", async () => {
+  let former;
+  class ReplacementWorker extends MockWorker {
+    postMessage({ id, payload }) {
+      if (payload === "crash") {
+        queueMicrotask(() => {
+          for (const fn of this.handlers.error) fn({ message: "crash" });
+        });
+        return;
+      }
+      super.postMessage({ id, payload });
+    }
+  }
+  const pool = new RequestPool({
+    workers: 1,
+    workerFactory: () => {
+      const worker = new ReplacementWorker();
+      former ??= worker;
+      return worker;
+    },
+  });
+  await assert.rejects(pool.submit("crash"), /crash/);
+  for (const fn of former.handlers.message) {
+    fn({ data: { id: 1, ok: true, result: 999 } });
+  }
+  assert.equal(await pool.submit(3), 6);
+  pool.close();
+});
