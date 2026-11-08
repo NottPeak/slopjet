@@ -1,0 +1,30 @@
+name: Slopjet perftest
+on:
+  push:
+    branches: [perftest]
+  workflow_dispatch:
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/core/rewriter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Validate experimental crate
+        run: cargo test -p slopjet-perftest-scanner
+      - name: Compile wasm rewriter with experimental feature
+        run: cargo check -p wasm --features perftest --target wasm32-unknown-unknown
+      - name: Run request-throughput smoke benchmark
+        run: cargo run --release -p slopjet-perftest-scanner --example throughput -- 200
+  browser-pool:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test experiments/perftest/browser-pool.test.mjs
