@@ -82,13 +82,17 @@ fn get_js_flags(obj: &Object, base: String, is_module: bool) -> Result<Flags> {
 // Perftest opt-in route: only scripts containing inert string statements,
 // comments and semicolons bypass OXC. All other scripts take the original path.
 // This is intentionally NOT a general-purpose JS rewrite implementation.
-fn try_inert_output(js: &str, flags: &Flags) -> Result<Option<JsRewriterOutput>> {
-    if flags.do_sourcemaps || flags.capture_errors || flags.scramitize
-        || !slopjet_perftest_scanner::gate::identity_safe(js) {
+fn try_inert_output(js: &str, flags: &Flags, config: &Config) -> Result<Option<JsRewriterOutput>> {
+    if flags.do_sourcemaps || flags.capture_errors || flags.scramitize {
         return Ok(None);
     }
+    let fast = slopjet_perftest_scanner::gate::rewrite_simple_global(js, &config.wrapfn);
+    if fast.is_none() && !slopjet_perftest_scanner::gate::identity_safe(js) {
+        return Ok(None);
+    }
+    let fast = fast.as_deref().unwrap_or(js);
     let obj = Object::new();
-    set_obj(&obj, "js", &Uint8Array::from(js.as_bytes()).into())?;
+    set_obj(&obj, "js", &Uint8Array::from(fast.as_bytes()).into())?;
     set_obj(&obj, "map", &Uint8Array::from(&[0u8, 0, 0, 0][..]).into())?;
     set_obj(&obj, "scramtag", &scramtag().into())?;
     set_obj(&obj, "errors", &Array::new().into())?;
@@ -127,7 +131,7 @@ impl Rewriter {
 		let config = get_js_config(jsconfig)?;
 		let flags = get_js_flags(jsflags, base, module)?;
 		#[cfg(feature = "perftest")]
-		if let Some(output) = try_inert_output(&js, &flags)? {
+		if let Some(output) = try_inert_output(&js, &flags, &config)? {
 			return Ok(output);
 		}
 		let rewriter = get_url_rewriter(encode_url)?;
