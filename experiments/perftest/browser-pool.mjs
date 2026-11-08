@@ -1,36 +1,60 @@
 /**
- * Independent-request worker pool. No file/chunk sharing between workers.
- * Works with dedicated Web Workers; inject factory for bundler-specific URLs.
- * This is an experimental scheduler, not connected to the live proxy yet.
+ * Configurable bounded request-level Web Worker pool.
+ *
+ * A browser page / dedicated worker may use this pool. A Service Worker
+ * CANNOT spawn Web Workers; service-worker integration needs an opt-in
+ * message broker hosted by a live controlled client, with local fallback.
  *
  * Protocol: request {id, payload} -> response {id, ok, result?, error?}
+ * Every worker processes independent requests; no cross-user scanner state.
  */
 export class RequestPool {
   #workers = [];
+  #workerFactory;
   #pending = new Map();
   #queue = [];
   #nextId = 1;
   #closed = false;
   #maxQueue;
+
   constructor({ workerFactory, workers = 2, maxQueue = 1024 }) {
     if (typeof workerFactory !== "function") throw new TypeError("workerFactory required");
     if (!Number.isSafeInteger(workers) || workers < 1) throw new RangeError("workers must be >= 1");
     if (!Number.isSafeInteger(maxQueue) || maxQueue < 0) throw new RangeError("maxQueue must be >= 0");
+    this.#workerFactory = workerFactory;
     this.#maxQueue = maxQueue;
-    for (let index = 0; index < workers; index++) {
-      const worker = workerFactory(index);
-      const slot = { worker, busy: false, id: null };
-      worker.addEventListener("message", (event) => this.#complete(slot, event.data));
-      worker.addEventListener("error", (event) => {
-        const err = new Error(event.message || "worker error");
-        this.#fail(slot, err);
-      });
-      this.#workers.push(slot);
+    try {
+      for (let index = 0; index < workers; index++) {
+        const slot = { worker: null, busy: false, id: null, index };
+        this.#start(slot);
+        this.#workers.push(slot);
+      }
+    } catch (error) {
+      this.close();
+      throw error;
     }
   }
+
+  #start(slot) {
+    const worker = this.#workerFactory(slot.index);
+    slot.worker = worker;
+    slot.busy = false;
+    slot.id = null;
+    // Ignore late messages from terminated/replaced workers.
+    worker.addEventListener("message", (event) => {
+      if (slot.worker === worker && !this.#closed) this.#complete(slot, event.data);
+    });
+    for (const name of ["error", "messageerror"]) {
+      worker.addEventListener(name, (event) => {
+        if (slot.worker === worker && !this.#closed) {
+          this.#fail(slot, new Error(event.message || name));
+        }
+      });
+    }
+  }
+
   submit(payload, transfer = []) {
     if (this.#closed) return Promise.reject(new Error("pool closed"));
-    // Queue capacity applies only to waiting tasks, not executing workers.
     if (this.#queue.length >= this.#maxQueue &&
         this.#workers.every(slot => slot.busy)) {
       return Promise.reject(new Error("request queue saturated"));
@@ -43,6 +67,7 @@ export class RequestPool {
       this.#drain();
     });
   }
+
   #drain() {
     if (this.#closed) return;
     for (const slot of this.#workers) {
@@ -57,6 +82,7 @@ export class RequestPool {
       }
     }
   }
+
   #fail(slot, error) {
     if (slot.id !== null) {
       const task = this.#pending.get(slot.id);
@@ -65,8 +91,16 @@ export class RequestPool {
     }
     slot.busy = false;
     slot.id = null;
+    try {
+      slot.worker?.terminate();
+      this.#start(slot);
+    } catch (startError) {
+      this.close();
+      return;
+    }
     this.#drain();
   }
+
   #complete(slot, message) {
     if (!slot.busy || message?.id !== slot.id) {
       this.#fail(slot, new Error("worker response ID mismatch"));
@@ -80,13 +114,14 @@ export class RequestPool {
     else task?.reject(new Error(message.error || "worker request failed"));
     this.#drain();
   }
+
   close() {
     if (this.#closed) return;
     this.#closed = true;
     for (const task of this.#pending.values()) task.reject(new Error("pool closed"));
     this.#pending.clear();
     this.#queue.length = 0;
-    for (const slot of this.#workers) slot.worker.terminate();
+    for (const slot of this.#workers) slot.worker?.terminate();
     this.#workers.length = 0;
   }
 }
