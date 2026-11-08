@@ -106,6 +106,8 @@ export async function rewriteJsResponse(
         try { fast = session!.finish(); }
         catch { fast = null; }
     }
+    // wasm-bindgen objects retain WASM heap allocations until explicitly freed.
+    session?.free?.();
     if (fast !== null) {
         return new TextEncoder().encode(fast);
     }
