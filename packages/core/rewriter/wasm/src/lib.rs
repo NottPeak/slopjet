@@ -161,8 +161,9 @@ impl Rewriter {
 		url: String,
 		module: bool,
 	) -> Result<JsRewriterOutput> {
-		// SAFETY: we know the js is a valid utf-8 string
-		let js = unsafe { std::string::String::from_utf8_unchecked(js) };
+		// Network responses may contain malformed UTF-8; never assume validity.
+		let js = String::from_utf8(js)
+			.map_err(|error| JsValue::from_str(&format!("invalid UTF-8 JavaScript input: {error}")))?;
 
 		self.rewrite_js(jsconfig, jsflags, encode_url, js, base, url, module)
 	}
