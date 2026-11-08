@@ -88,3 +88,20 @@ fn whole_program_fast_path_matches_oxc() {
         assert_eq!(oxc_output(source), fast, "{source:?}");
     }
 }
+
+#[test]
+fn computed_member_fast_path_matches_oxc() {
+    for source in [
+        "window[location];",
+        "top[\"location\"];",
+        "obj[foo];",
+        "obj[0];",
+        "obj[\"other\"];",
+        "parent [ 'eval' ] ;",
+    ] {
+        let fast = slopjet_perftest_scanner::simple::rewrite_computed(
+            source, "$wrap", "$wrapProperty", false
+        ).expect("fixture recognized");
+        assert_eq!(oxc_output(source), fast, "{source:?}");
+    }
+}
