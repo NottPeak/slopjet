@@ -1,5 +1,6 @@
 // i am a cat. i like to be petted. i like to be fed. i like to be
 import { initSync, Rewriter } from "../../../rewriter/wasm/out/wasm.js";
+import * as WasmExports from "../../../rewriter/wasm/out/wasm.js";
 import type { JsRewriterOutput } from "../../../rewriter/wasm/out/wasm.js";
 import { flagEnabled, ScramjetContext } from "@/shared";
 
@@ -55,4 +56,30 @@ export function getRewriter(
 	obj.inUse = true;
 
 	return [obj.rewriter, () => (obj.inUse = false)];
+}
+
+
+/**
+ * Experimental WASM chunked rewriting API. Only available when the WASM
+ * rewriter is compiled with Cargo feature "perftest". Ordinary builds
+ * return null and continue using OXC without any behavior change.
+ */
+export type PerftestRewriteSessionLike = {
+    write(chunk: string): void;
+    finish(): string | null;
+};
+export function createPerftestRewriteSession(
+    wrapfn: string,
+    propertybase: string
+): PerftestRewriteSessionLike | null {
+    const exports = WasmExports as unknown as {
+        PerftestRewriteSession?: new (
+            wrapfn: string,
+            propertybase: string
+        ) => PerftestRewriteSessionLike
+    };
+    const Constructor = exports.PerftestRewriteSession;
+    if (typeof Constructor !== "function") return null;
+    initWasm();
+    return new Constructor(wrapfn, propertybase);
 }
