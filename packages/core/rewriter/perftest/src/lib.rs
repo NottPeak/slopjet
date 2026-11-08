@@ -1,6 +1,7 @@
 //! Incremental scanner experiment. Not yet a rewrite engine.
 //! This stage separates lexical spans; ambiguous syntax is never rewritten.
 pub mod deferred;
+pub mod requests;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind { Identifier, Space, String, Comment, Punctuation }
 #[derive(Debug, Clone, PartialEq, Eq)]
