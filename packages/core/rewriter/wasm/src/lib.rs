@@ -86,7 +86,10 @@ fn try_inert_output(js: &str, flags: &Flags, config: &Config) -> Result<Option<J
     if flags.do_sourcemaps || flags.capture_errors || flags.scramitize {
         return Ok(None);
     }
-    let mut scanner = slopjet_perftest_scanner::stream::StreamingProgram::new(&config.wrapfn, &config.wrappropertybase);
+    let mut scanner = slopjet_perftest_scanner::stream::StreamingProgram::with_computed(
+        &config.wrapfn, &config.wrappropertybase, &config.wrappropertyfn,
+        flags.disable_computed_wrap
+    );
     scanner.write(js);
     let fast = scanner.finish();
     if fast.is_none() && !slopjet_perftest_scanner::gate::identity_safe(js) {
@@ -220,9 +223,9 @@ pub struct PerftestRewriteSession {
 #[wasm_bindgen]
 impl PerftestRewriteSession {
     #[wasm_bindgen(constructor)]
-    pub fn new(wrapfn: String, propertybase: String) -> Self {
-        Self { scanner: Some(slopjet_perftest_scanner::stream::StreamingProgram::new(
-            wrapfn, propertybase
+    pub fn new(wrapfn: String, propertybase: String, propertyfn: String, disable_computed_wrap: bool) -> Self {
+        Self { scanner: Some(slopjet_perftest_scanner::stream::StreamingProgram::with_computed(
+            wrapfn, propertybase, propertyfn, disable_computed_wrap
         )) }
     }
     pub fn write(&mut self, chunk: &str) -> std::result::Result<(), JsValue> {
