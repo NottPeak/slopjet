@@ -12,6 +12,8 @@ enum Mode { Code, Slash, Single, Double, LineComment, BlockComment, BlockStar }
 pub struct StreamingProgram {
     wrapfn: String,
     propertybase: String,
+    propertyfn: Option<String>,
+    disable_computed_wrap: bool,
     mode: Mode,
     escaped: bool,
     raw_len: usize,
@@ -24,10 +26,20 @@ impl StreamingProgram {
     pub fn new(wrapfn: impl Into<String>, propertybase: impl Into<String>) -> Self {
         Self {
             wrapfn: wrapfn.into(), propertybase: propertybase.into(),
+            propertyfn: None, disable_computed_wrap: false,
             mode: Mode::Code, escaped: false,
             raw_len: 0, segment: String::new(),
             completed: String::new(), unsupported: false,
         }
+    }
+    pub fn with_computed(
+        wrapfn: impl Into<String>, propertybase: impl Into<String>,
+        propertyfn: impl Into<String>, disable_computed_wrap: bool
+    ) -> Self {
+        let mut engine = Self::new(wrapfn, propertybase);
+        engine.propertyfn = Some(propertyfn.into());
+        engine.disable_computed_wrap = disable_computed_wrap;
+        engine
     }
     pub fn bytes_seen(&self) -> usize { self.raw_len }
     pub fn buffered_bytes(&self) -> usize { self.segment.len() + self.completed.len() }
@@ -38,7 +50,13 @@ impl StreamingProgram {
         let transformed = if identity_safe(&self.segment) {
             Some(self.segment.clone())
         } else {
-            simple::rewrite(&self.segment, &self.wrapfn, &self.propertybase)
+            simple::rewrite(&self.segment, &self.wrapfn, &self.propertybase).or_else(|| {
+                self.propertyfn.as_ref().and_then(|propertyfn| {
+                    simple::rewrite_computed(
+                        &self.segment, &self.wrapfn, propertyfn, self.disable_computed_wrap
+                    )
+                })
+            })
         };
         match transformed {
             Some(value) => self.completed.push_str(&value),
