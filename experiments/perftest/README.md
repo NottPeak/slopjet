@@ -37,3 +37,26 @@ Build a stateful, incremental JavaScript rewriting engine which can retain lexic
 - Should HTML streaming be a separate benchmark track after the JavaScript semantic engine?
 
 No performance claims are made until measured. This document is a plan, not a completed engine.
+
+## Architecture decision log (2026-11-08)
+- Core language: Rust, with eventual wasm32 target.
+- One forward lexical pass with deferred emission; no mandatory pre-scan.
+- Concurrency is **across independent requests**, not across arbitrary chunks of a single source.
+- Native benchmark worker count is configurable; browser deployment will require Web Worker scheduling and independent WASM instances.
+- Per-request state must never be shared between users or requests.
+
+## Implemented in this branch
+- `perftest/src/lib.rs`: conservative incremental lexical scanner.
+- `perftest/src/deferred.rs`: deferred source coordinator (currently holds through EOF).
+- `perftest/src/requests.rs`: native bounded independent-request pool and sequential wasm32 fallback.
+- `perftest/examples/throughput.rs`: standalone throughput comparison, **not OXC**.
+
+## Not implemented / unverified
+- JavaScript grammar, scope resolution, and actual rewrite operations.
+- Streaming safe-release barriers and forward-binding resolution.
+- Regexp/template/Unicode complete lexical support.
+- wasm-bindgen exports and browser Web Worker pool.
+- Integration into Scramjet's active rewrite path or OXC differential correctness tests.
+- Benchmarks have not been executed in this environment.
+
+Do not enable the prototype for real page rewriting yet. It returns original source for supported lexemes and errors on unsupported syntax; it is not a drop-in Scramjet rewriter.
