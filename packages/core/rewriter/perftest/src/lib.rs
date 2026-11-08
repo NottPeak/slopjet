@@ -1,3 +1,4 @@
+pub mod deferred;
 //! Incremental scanner experiment. Not yet a rewrite engine.
 //! This stage separates lexical spans; ambiguous syntax is never rewritten.
 #[derive(Debug, Clone, PartialEq, Eq)]
