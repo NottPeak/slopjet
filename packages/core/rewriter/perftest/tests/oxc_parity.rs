@@ -53,3 +53,21 @@ fn standalone_global_fast_path_matches_oxc() {
         assert_eq!(oxc_output(source), fast, "{source:?}");
     }
 }
+
+#[test]
+fn static_member_fast_path_matches_oxc() {
+    for source in [
+        "window.location;",
+        "top.location;",
+        " parent . top . eval; ",
+        "this.location",
+        "document.cookie;",
+        "window.location.href;",
+        "obj . parent . location;",
+    ] {
+        let fast = slopjet_perftest_scanner::simple::rewrite(
+            source, "$wrap", "$property$"
+        ).expect("fixture recognized by fast path");
+        assert_eq!(oxc_output(source), fast, "{source:?}");
+    }
+}
