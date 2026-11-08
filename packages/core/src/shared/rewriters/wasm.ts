@@ -10,6 +10,7 @@ import { URLMeta } from "@rewriters/url";
 import { Error, TextDecoder_decode } from "@/shared/snapshot";
 
 let wasm_u8: Uint8Array;
+let initializedBytes: Uint8Array | undefined;
 export function setWasm(u8: Uint8Array | ArrayBuffer) {
 	wasm_u8 = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8);
 }
@@ -17,6 +18,8 @@ export function setWasm(u8: Uint8Array | ArrayBuffer) {
 const MAGIC = "\0asm".split("").map((x) => x.charCodeAt(0));
 
 function initWasm() {
+	// Do not recompile the identical module on every intercepted JS request.
+	if (initializedBytes === wasm_u8) return;
 	if (!(wasm_u8 instanceof Uint8Array))
 		throw new Error("rewriter wasm not found (was setWasm called?)");
 
@@ -29,6 +32,7 @@ function initWasm() {
 	initSync({
 		module: new WebAssembly.Module(wasm_u8 as unknown as BufferSource),
 	});
+	initializedBytes = wasm_u8;
 }
 
 type RewriterBox = { rewriter: Rewriter; inUse: boolean };
