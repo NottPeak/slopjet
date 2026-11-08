@@ -202,9 +202,23 @@ function makeId(): string {
 
 const deepMerge = deepmerge();
 
+export type PerftestWorkerPool = {
+    submit(payload: {
+        source: Uint8Array;
+        options: {
+            wrapfn: string;
+            propertybase: string;
+            propertyfn: string;
+            disableComputedWrap: boolean;
+        };
+    }): Promise<string | null>;
+};
+
 type ControllerInit = {
 	serviceworker: ServiceWorker;
 	transport: ProxyTransport;
+    /** A pool hosted by the controller's window; the SW cannot spawn Workers. */
+    perftestWorkers?: PerftestWorkerPool;
 	config?: Partial<Config>;
 	scramjetConfig?: Partial<ScramjetConfig>;
 };
@@ -725,6 +739,11 @@ export class Frame {
 			prefix: new URL(this.prefix, location.href),
 			cookieJar: this.controller.cookieJar,
 			interface: {
+                rewriteJsFastAsync: this.controller.init.perftestWorkers
+                    ? (source, options) => this.controller.init.perftestWorkers!.submit({
+                        source, options
+                    })
+                    : undefined,
 				getInjectScripts: yieldGetInjectScripts(
 					this.controller.config,
 					this.controller.scramjetConfig,
