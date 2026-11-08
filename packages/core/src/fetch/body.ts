@@ -15,6 +15,7 @@ import {
 	rewriteWorkers,
 } from "@/shared";
 import { sniffEncoding } from "@/shared/sniffEncoding";
+import { rewriteJsResponse } from "@rewriters/streaming";
 import { _TextDecoder } from "@/shared/snapshot";
 
 export async function rewriteBody(
@@ -55,8 +56,8 @@ export async function rewriteBody(
 					return response.body;
 				}
 
-				let rewritten = rewriteJs(
-					new Uint8Array(await response.arrayBuffer()),
+				let rewritten = await rewriteJsResponse(
+					response,
 					response.url,
 					handler.context,
 					parsed.meta,
