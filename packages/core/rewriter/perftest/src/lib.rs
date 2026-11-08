@@ -6,6 +6,7 @@ pub mod requests;
 pub mod gate;
 pub mod simple;
 pub mod program;
+pub mod stream;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind { Identifier, Space, String, Comment, Punctuation }
 #[derive(Debug, Clone, PartialEq, Eq)]
