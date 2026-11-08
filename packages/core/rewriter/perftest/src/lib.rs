@@ -4,6 +4,7 @@ pub mod deferred;
 pub mod edits;
 pub mod requests;
 pub mod gate;
+pub mod simple;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind { Identifier, Space, String, Comment, Punctuation }
 #[derive(Debug, Clone, PartialEq, Eq)]
