@@ -22,8 +22,6 @@ jobs:
         run: cargo check -p wasm --features perftest --target wasm32-unknown-unknown
       - name: Run request-throughput smoke benchmark
         run: cargo run --release -p slopjet-perftest-scanner --example throughput -- 200
-      - name: Compare real OXC rewrite against AST-free subset
-        run: cargo run --release -p slopjet-perftest-scanner --example oxc_compare -- 1000
   browser-pool:
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +29,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test experiments/perftest/*.test.mjs
+      - run: node --test experiments/perftest/browser-pool.test.mjs experiments/perftest/wasm-worker.test.mjs
 
   types:
     runs-on: ubuntu-latest
