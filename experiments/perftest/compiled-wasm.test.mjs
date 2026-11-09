@@ -28,12 +28,12 @@ const flags = {
   disableComputedWrap: false, destructureRewrites: false,
 };
 
-function rewrite(source) {
+function rewrite(source, module = false) {
   const engine = new wasm.Rewriter();
   try {
     const output = engine.rewrite_js(
       cfg, flags, () => { throw new Error("URL codec must not be invoked"); },
-      source, "https://example.com/", "test.js", false
+      source, "https://example.com/", "test.js", module
     );
     assert.ok(output.js instanceof Uint8Array);
     return new TextDecoder().decode(output.js);
@@ -41,11 +41,11 @@ function rewrite(source) {
     engine.free();
   }
 }
-function stream(source, n = 1) {
+function stream(source, n = 1, module = false) {
   const engine = new wasm.PerftestRewriteSession(
     cfg.wrapfn, cfg.wrappropertybase, cfg.wrappropertyfn, false,
     cfg.importfn, cfg.rewritefn, cfg.wrappostmessagefn, "https://example.com/",
-    cfg.metafn, false, cfg.trysetfn
+    cfg.metafn, module, cfg.trysetfn
   );
   try {
     for (let i = 0; i < source.length; i += n) {
@@ -78,6 +78,18 @@ test("the compiled standalone WASM engine rewrites ordinary JS expressions", () 
   }
 });
 
+test("module metadata and named exports rewrite through compiled WASM", () => {
+  const cases = [
+    ["const url = import.meta.url;", 'const url = $meta(import.meta,"https://example.com/").url;'],
+    ["export const url = top.location;", "export const url = $wrap(top).$property$location;"],
+  ];
+  for (const [src, expected] of cases) {
+    assert.equal(rewrite(src, true), expected);
+    for (let n = 1; n <= src.length; n++) {
+      assert.equal(stream(src, n, true), expected);
+    }
+  }
+});
 test("unsupported syntax is rejected, not passed through", () => {
   const invalid = [
     "const location = 5;",
