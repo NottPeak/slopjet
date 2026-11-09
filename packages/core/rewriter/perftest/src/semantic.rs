@@ -987,6 +987,18 @@ mod tests {
             Some("obj.import('./x');".into()));
     }
     #[test]
+    fn accessor_and_async_method_bodies_have_local_parameter_scopes() {
+        let source = "const o={set location(top){this.v=top;}};top;";
+        let expected = "const o={set location(top){this.v=top;}};$wrap(top);";
+        assert_eq!(rewrite(source, 100), Some(expected.into()));
+        let source = "class X {set location(top){return top;}} top;";
+        let expected = "class X {set location(top){return top;}} $wrap(top);";
+        assert_eq!(rewrite(source, 100), Some(expected.into()));
+        let source = "const o={get location(){return top;}};";
+        let expected = "const o={get location(){return $wrap(top);}};";
+        assert_eq!(rewrite(source, 100), Some(expected.into()));
+    }
+    #[test]
     fn local_exports_are_not_expression_references() {
         let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
             .with_module_meta("$meta", true);
