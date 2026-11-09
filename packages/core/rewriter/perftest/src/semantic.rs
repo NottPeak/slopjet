@@ -75,6 +75,7 @@ pub struct SemanticProgram {
     importfn: String, rewritefn: String, postmessagefn: String, base: String,
     metafn: String, is_module: bool, trysetfn: String,
     limits: Limits,
+    paren_controls: Vec<bool>, last_closed_control: bool,
 }
 impl SemanticProgram {
     pub fn new(wrapfn: impl Into<String>, propertybase: impl Into<String>,
@@ -87,7 +88,8 @@ impl SemanticProgram {
             importfn: String::new(), rewritefn: String::new(),
             postmessagefn: String::new(), base: String::new(),
             metafn: String::new(), is_module: false, trysetfn: String::new(),
-            limits: Limits::default() }
+            limits: Limits::default(),
+            paren_controls: Vec::new(), last_closed_control: false }
     }
     pub fn with_helpers(
         mut self, importfn: impl Into<String>, rewritefn: impl Into<String>,
@@ -123,6 +125,22 @@ impl SemanticProgram {
             self.unsupported = true;
             return;
         }
+        // Track whether the most recent ')' closed an if/while/for/switch
+        // condition. This disambiguates regexp vs division in O(1), without
+        // scanning backwards over the entire token stream for every slash.
+        let text = &self.source[self.start..self.cursor];
+        if kind == Kind::Punct && text == "(" {
+            let control = self.tokens.last().is_some_and(|last| {
+                matches!(&self.source[last.start..last.end],
+                    "if" | "while" | "for" | "switch" | "with")
+            });
+            self.paren_controls.push(control);
+            self.last_closed_control = false;
+        } else if kind == Kind::Punct && text == ")" {
+            self.last_closed_control = self.paren_controls.pop().unwrap_or(false);
+        } else {
+            self.last_closed_control = false;
+        }
         self.tokens.push(Token { start: self.start, end: self.cursor, kind });
         self.mode = Mode::Code;
     }
@@ -143,25 +161,7 @@ impl SemanticProgram {
     /// After an ordinary call, it is division; after a control condition,
     /// it begins a regexp statement. Ambiguous syntax is still rejected.
     fn after_control_condition(&self) -> bool {
-        let Some(last) = self.tokens.last() else { return false; };
-        if &self.source[last.start..last.end] != ")" { return false; }
-        let mut depth: usize = 0;
-        for i in (0..self.tokens.len()).rev() {
-            let tok = self.tokens[i];
-            let word = &self.source[tok.start..tok.end];
-            if word == ")" { depth += 1; }
-            else if word == "(" {
-                if depth == 0 { return false; }
-                depth -= 1;
-                if depth == 0 {
-                    if i == 0 { return false; }
-                    let prior = self.tokens[i-1];
-                    return matches!(&self.source[prior.start..prior.end],
-                        "if" | "while" | "for" | "with" | "switch");
-                }
-            }
-        }
-        false
+        self.last_closed_control
     }
     pub fn write(&mut self, chunk: &str) {
         if self.unsupported { return; }
@@ -1252,6 +1252,17 @@ mod tests {
         }
         assert!(rewrite("top.location.href;", 100).is_some());
         assert!(rewrite("window['location'];", 100).is_some());
+    }
+    #[test]
+    fn distinguishes_regexp_after_control_from_division_after_call() {
+        for source in [
+            "if (true) /abc/.test('abc');",
+            "while (false) /x/.test('x');",
+            "const x = run(1) / 2;",
+            "const x = run((1+2)) / 2;",
+        ] {
+            assert!(rewrite(source, source.len()).is_some(), "{source:?}");
+        }
     }
     #[test]
     fn fails_closed() {
