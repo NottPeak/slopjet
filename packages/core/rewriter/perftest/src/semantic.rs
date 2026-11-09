@@ -6,8 +6,10 @@ enum Kind { Word, Number, Literal, Punct }
 #[derive(Clone, Copy, Debug)]
 struct Token { start: usize, end: usize, kind: Kind }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mode { Code, Word, Number, Quote(u8), Slash, Regex, RegexFlags,
+enum Mode { Code, Word, Number, Quote(u8), Template, Slash, Regex, RegexFlags,
     LineComment, BlockComment }
+#[derive(Clone, Copy, Debug)]
+struct TemplateFrame { depth: usize, in_expression: bool }
 #[derive(Default)]
 struct Patch { before: String, replace: Option<String>, after: String }
 
@@ -24,7 +26,8 @@ fn not_object(s: &str) -> bool {
 pub struct SemanticProgram {
     source: String, tokens: Vec<Token>, cursor: usize, start: usize,
     mode: Mode, escaped: bool, in_class: bool, prev_star: bool,
-    unsupported: bool, wrapfn: String, propertybase: String,
+    unsupported: bool, templates: Vec<TemplateFrame>,
+    wrapfn: String, propertybase: String,
     propertyfn: String, disable_computed: bool,
 }
 impl SemanticProgram {
@@ -32,7 +35,8 @@ impl SemanticProgram {
         propertyfn: impl Into<String>, disable_computed: bool) -> Self {
         Self { source: String::new(), tokens: Vec::new(), cursor: 0, start: 0,
             mode: Mode::Code, escaped: false, in_class: false, prev_star: false,
-            unsupported: false, wrapfn: wrapfn.into(), propertybase: propertybase.into(),
+            unsupported: false, templates: Vec::new(),
+            wrapfn: wrapfn.into(), propertybase: propertybase.into(),
             propertyfn: propertyfn.into(), disable_computed }
     }
     fn emit(&mut self, kind: Kind) {
@@ -68,6 +72,24 @@ impl SemanticProgram {
                         self.mode = Mode::Quote(b); self.escaped = false;
                     } else if b == b'/' {
                         self.start = self.cursor; self.cursor += 1; self.mode = Mode::Slash;
+                    } else if b == 96 {
+                        self.cursor += 1;
+                        self.templates.push(TemplateFrame { depth: 0, in_expression: false });
+                        self.mode = Mode::Template;
+                        self.escaped = false;
+                    } else if b == b'{' && self.templates.last().is_some_and(|f| f.in_expression) {
+                        if let Some(frame) = self.templates.last_mut() { frame.depth += 1; }
+                        self.start = self.cursor; self.cursor += 1; self.emit(Kind::Punct);
+                    } else if b == b'}' && self.templates.last().is_some_and(|f| f.in_expression) {
+                        let ends_interpolation = self.templates.last().is_some_and(|f| f.depth == 0);
+                        if !ends_interpolation {
+                            if let Some(frame) = self.templates.last_mut() { frame.depth -= 1; }
+                        }
+                        self.start = self.cursor; self.cursor += 1; self.emit(Kind::Punct);
+                        if ends_interpolation {
+                            if let Some(frame) = self.templates.last_mut() { frame.in_expression = false; }
+                            self.mode = Mode::Template;
+                        }
                     } else if b.is_ascii_graphic() && b != 96 && b != b'\\' {
                         self.start = self.cursor; self.cursor += 1; self.emit(Kind::Punct);
                     } else { self.unsupported = true; }
@@ -87,6 +109,31 @@ impl SemanticProgram {
                     else if b == b'\\' { self.escaped = true; }
                     else if b == quote { self.emit(Kind::Literal); }
                     else if b == b'\r' || b == b'\n' { self.unsupported = true; }
+                }
+                Mode::Template => {
+                    let next = self.source.as_bytes().get(self.cursor+1).copied();
+                    if self.escaped {
+                        self.escaped = false;
+                        self.cursor += 1;
+                    } else if b == b'\\' {
+                        self.escaped = true;
+                        self.cursor += 1;
+                    } else if b == 96 {
+                        self.cursor += 1;
+                        self.templates.pop();
+                        self.mode = Mode::Code;
+                    } else if b == b'$' && next.is_none() {
+                        break;
+                    } else if b == b'$' && next == Some(b'{') {
+                        self.cursor += 1;
+                        self.start = self.cursor;
+                        self.cursor += 1;
+                        self.emit(Kind::Punct);
+                        if let Some(frame) = self.templates.last_mut() {
+                            frame.in_expression = true;
+                            frame.depth = 0;
+                        }
+                    } else { self.cursor += 1; }
                 }
                 Mode::Slash => {
                     if b == b'/' { self.cursor += 1; self.mode = Mode::LineComment; }
@@ -130,7 +177,7 @@ impl SemanticProgram {
         }
     }
     fn close(&mut self) -> bool {
-        if self.unsupported { return false; }
+        if self.unsupported || !self.templates.is_empty() { return false; }
         match self.mode {
             Mode::Code | Mode::LineComment => {}
             Mode::Word => self.emit(Kind::Word),
@@ -340,6 +387,19 @@ mod tests {
             "const x = {foo:top}, eval = 7;",
         ] {
             assert!(rewrite(src, src.len()).is_none(), "{src:?}");
+        }
+    }
+    #[test]
+    fn template_interpolations_and_chunk_boundaries() {
+        let source = "const t = `host ${window.location.hostname}: ${top}`;";
+        let expected = "const t = `host ${window.$prop$location.hostname}: ${$wrap(top)}`;";
+        for n in 1..=source.len() {
+            assert_eq!(rewrite(source, n), Some(expected.into()), "chunk {n}");
+        }
+        let nested = "const t = `a ${`b ${top}`}`;";
+        let nested_expected = "const t = `a ${`b ${$wrap(top)}`}`;";
+        for n in 1..=nested.len() {
+            assert_eq!(rewrite(nested, n), Some(nested_expected.into()), "nested {n}");
         }
     }
     #[test]
