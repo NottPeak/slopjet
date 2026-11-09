@@ -77,7 +77,7 @@ mod tests {
     fn independent_requests_keep_order_and_fail_individually() {
         let input = vec![
             Request { id: 8, source: "window.location;".into() },
-            Request { id: 2, source: "import(\u0027./x.js\u0027);".into() },
+            Request { id: 2, source: "import('./x.js');".into() },
             Request { id: 4, source: "const x = 'ok';".into() },
         ];
         let expected = process_sequential(input.clone());
