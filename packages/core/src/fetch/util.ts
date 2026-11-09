@@ -1,4 +1,4 @@
-import { isHtmlMimeType, ScramjetHeaders } from "@/shared";
+import { isHtmlMimeType, isJavascriptMimeType, ScramjetHeaders } from "@/shared";
 import { BareResponse } from "@mercuryworkshop/proxy-transports";
 import { ScramjetFetchParsed } from ".";
 
@@ -6,13 +6,25 @@ export function normalizeContentType(
 	parsed: ScramjetFetchParsed,
 	headers: ScramjetHeaders
 ) {
-	if (!isDocument(parsed)) return;
-
 	const ct = headers.get("content-type");
-	if (!ct) return;
-	if (!isHtmlMimeType(ct)) return;
+	if (isDocument(parsed)) {
+		if (ct && isHtmlMimeType(ct))
+			headers.set("content-type", "text/html; charset=utf-8");
+		return;
+	}
 
-	headers.set("content-type", "text/html; charset=utf-8");
+	// JS network rewriting emits UTF-8 bytes even if the source script used
+	// a legacy charset. Keep the MIME type (module scripts validate it)
+	// but update its declared encoding to match the transformed payload.
+	if (
+		parsed.destination === "script" ||
+		parsed.destination === "worker" ||
+		parsed.destination === "sharedworker"
+	) {
+		if (!ct || !isJavascriptMimeType(ct)) return;
+		const mime = ct.split(";")[0].trim();
+		headers.set("content-type", mime + "; charset=utf-8");
+	}
 }
 
 export function isRedirect(response: BareResponse) {
