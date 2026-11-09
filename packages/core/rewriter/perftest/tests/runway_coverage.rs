@@ -2,7 +2,8 @@ use slopjet_perftest_scanner::semantic::SemanticProgram;
 
 fn analyze(source: &str) -> Option<String> {
     let mut engine = SemanticProgram::new("$wrap", "$property$", "$computed", false)
-        .with_helpers("$import", "$rewrite", "$postmessage", "http://example.test/");
+        .with_helpers("$import", "$rewrite", "$postmessage", "http://example.test/")
+        .with_assignment("$tryset");
     engine.write(source);
     engine.finish()
 }
