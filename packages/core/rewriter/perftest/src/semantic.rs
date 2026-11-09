@@ -51,7 +51,7 @@ pub struct SemanticProgram {
     wrapfn: String, propertybase: String,
     propertyfn: String, disable_computed: bool,
     importfn: String, rewritefn: String, postmessagefn: String, base: String,
-    metafn: String, is_module: bool,
+    metafn: String, is_module: bool, trysetfn: String,
 }
 impl SemanticProgram {
     pub fn new(wrapfn: impl Into<String>, propertybase: impl Into<String>,
@@ -63,7 +63,7 @@ impl SemanticProgram {
             propertyfn: propertyfn.into(), disable_computed,
             importfn: String::new(), rewritefn: String::new(),
             postmessagefn: String::new(), base: String::new(),
-            metafn: String::new(), is_module: false }
+            metafn: String::new(), is_module: false, trysetfn: String::new() }
     }
     pub fn with_helpers(
         mut self, importfn: impl Into<String>, rewritefn: impl Into<String>,
@@ -79,6 +79,11 @@ impl SemanticProgram {
     pub fn with_module_meta(mut self, metafn: impl Into<String>, is_module: bool) -> Self {
         self.metafn = metafn.into();
         self.is_module = is_module;
+        self
+    }
+
+    pub fn with_assignment(mut self, trysetfn: impl Into<String>) -> Self {
+        self.trysetfn = trysetfn.into();
         self
     }
 
@@ -398,6 +403,21 @@ impl SemanticProgram {
                 "var" | "let" | "const" | "function" | "class" | "new") {
                 return None;
             }
+            // Standalone location assignments use the proxy's dedicated
+            // setter helper. RHS evaluation occurs once inside the wrapper.
+            if w == "location" && self.is(i+1, "=") && !self.trysetfn.is_empty()
+                && (i == 0 || self.is(i-1, ";") || self.is(i-1, "{"))
+                && i+2 < n
+                && matches!(self.tokens[i+2].kind, Kind::Word | Kind::Number | Kind::Literal)
+                && (i+3 == n || self.is(i+3, ";")) {
+                patch(&mut patches, i).replace = Some(format!(
+                    "((t)=>{}(location,\\\"=\\\",t)||(location=t))(",
+                    self.trysetfn
+                ));
+                patch(&mut patches, i+1).replace = Some(String::new());
+                patch(&mut patches, i+2).after.push(')');
+                continue;
+            }
             if (self.is(i+1, "=") && !self.is(i+2, "=") && !self.is(i+2, ">")) ||
                 (i > 1 && (
                     self.is(i-1, "+") && self.is(i-2, "+") ||
@@ -559,6 +579,15 @@ mod tests {
         engine.write("const url = import.meta.url;");
         assert_eq!(engine.finish(), Some(
             "const url = $meta(import.meta,\"https://site.test/app.mjs\").url;".into()
+        ));
+    }
+    #[test]
+    fn location_assignment_is_intercepted_and_rhs_evaluated_once() {
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_assignment("$tryset");
+        engine.write("location = top;");
+        assert_eq!(engine.finish(), Some(
+            "((t)=>$tryset(location,\\\"=\\\",t)||(location=t))(  $wrap(top));".into()
         ));
     }
     #[test]
