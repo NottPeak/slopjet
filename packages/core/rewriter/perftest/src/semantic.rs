@@ -884,6 +884,18 @@ mod tests {
         ));
     }
     #[test]
+    fn groups_bare_protected_constructor_targets() {
+        for (source, expected) in [
+            ("new top();", "new ($wrap(top))();"),
+            ("new parent(1);", "new ($wrap(parent))(1);"),
+            ("new eval();", "new ($wrap(eval))();"),
+        ] {
+            assert_eq!(rewrite(source, source.len()), Some(expected.into()));
+        }
+        assert!(rewrite("new top.location();", 100).is_none());
+        assert!(rewrite("new parent;", 100).is_none());
+    }
+    #[test]
     fn location_assignment_is_intercepted_and_rhs_evaluated_once() {
         let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
             .with_assignment("$tryset");
