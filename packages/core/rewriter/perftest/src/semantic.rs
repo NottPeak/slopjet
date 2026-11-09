@@ -243,7 +243,7 @@ impl SemanticProgram {
     fn is(&self, i: usize, s: &str) -> bool {
         self.tokens.get(i).is_some_and(|_| self.word(i) == s)
     }
-    fn binding_safe(&self, pairs: &[Option<usize>]) -> bool {
+    fn grammar_safe(&self) -> bool {
         let n = self.tokens.len();
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
@@ -255,50 +255,10 @@ impl SemanticProgram {
                     Some("const" | "let" | "var" | "function" | "default" | "async")
                 ) { return false; }
             }
-            // import.meta and static imports need URL transformation.
             if w == "import" && !(self.is(i+1, "(") ||
-                self.is_module && !self.metafn.is_empty() && self.is(i+1, ".") && self.is(i+2, "meta")) { return false; }
-            if matches!(w, "var" | "let" | "const") {
-                // Detect all binding names, including later comma-separated
-                // declarators. Nested initializer expressions are skipped.
-                let mut j = i+1;
-                let mut expecting_binding = true;
-                while j < n && !self.is(j, ";") && !self.is(j, ")") {
-                    if self.is(j, "{") || self.is(j, "[") || self.is(j, "(") {
-                        let Some(end) = pairs[j] else { return false };
-                        if expecting_binding && (j+1..end)
-                            .any(|k| unsafe_name(self.word(k))) { return false; }
-                        j = end+1;
-                        expecting_binding = false;
-                        continue;
-                    }
-                    if self.is(j, ",") {
-                        expecting_binding = true;
-                    } else if expecting_binding && self.tokens[j].kind == Kind::Word {
-                        if unsafe_name(self.word(j)) { return false; }
-                        expecting_binding = false;
-                    }
-                    j += 1;
-                }
-            }
-            if matches!(w, "function" | "catch") {
-                let mut j = i+1;
-                while j < n && j < i+6 && !self.is(j, "(") && !self.is(j, "{") {
-                    j += 1;
-                }
-                if self.is(j, "(") {
-                    let Some(end) = pairs[j] else { return false };
-                    if (j+1..end).any(|k| unsafe_name(self.word(k))) { return false; }
-                }
-            }
-            if unsafe_name(w) && self.is(i+1, "=") && self.is(i+2, ">") {
+                self.is_module && !self.metafn.is_empty() &&
+                self.is(i+1, ".") && self.is(i+2, "meta")) {
                 return false;
-            }
-        }
-        for i in 1..n {
-            if self.is(i, "=") && self.is(i+1, ">") && self.is(i-1, ")") {
-                let Some(start) = pairs[i-1] else { return false };
-                if (start+1..i-1).any(|k| unsafe_name(self.word(k))) { return false; }
             }
         }
         true
@@ -319,7 +279,10 @@ impl SemanticProgram {
                 pairs[i] = Some(j);
             }
         }
-        if !stack.is_empty() || !self.binding_safe(&pairs) { return None; }
+        if !stack.is_empty() || !self.grammar_safe() { return None; }
+        let words: Vec<&str> = (0..n).map(|i| self.word(i)).collect();
+        let is_word: Vec<bool> = self.tokens.iter().map(|t| t.kind == Kind::Word).collect();
+        let scopes = crate::scopes::ScopeIndex::new(&words, &is_word, &pairs)?;
         // Object/array destructuring assignment syntax requires independent
         // property-binding handling, not a normal member-key rewrite.
         for i in 0..n {
@@ -427,6 +390,8 @@ impl SemanticProgram {
                 patch(&mut patches, i).replace = Some(format!("{}{}", self.propertybase, w));
                 continue;
             }
+            // Bindings discovered later in the same scope shadow this name.
+            if scopes.declaration(i) || scopes.shadowed(i, w) { continue; }
             if i>0 && self.is(i-1, "#") { continue; }
             if i>0 && matches!(self.word(i-1),
                 "var" | "let" | "const" | "function" | "class" | "new") {
@@ -549,14 +514,22 @@ mod tests {
         }
     }
     #[test]
-    fn rejects_multi_declarator_shadowing() {
-        for src in [
-            "var a = 1, location;",
-            "let x = top, parent = 5;",
-            "const x = {foo:top}, eval = 7;",
-        ] {
-            assert!(rewrite(src, src.len()).is_none(), "{src:?}");
-        }
+    fn resolves_multi_declarator_shadowing() {
+        assert_eq!(rewrite("var a = 1, location;location;", 200),
+            Some("var a = 1, location;location;".into()));
+        assert_eq!(rewrite("let x = top, parent = 5; top;", 200),
+            Some("let x = $wrap(top), parent = 5; $wrap(top);".into()));
+        assert_eq!(rewrite("const x = {foo:top}, parent = 7; parent;", 200),
+            Some("const x = {foo:$wrap(top)}, parent = 7; parent;".into()));
+    }
+    #[test]
+    fn nested_scope_forward_binding_resolution() {
+        let src = "top; { top; const top = 123; top; } top;";
+        assert_eq!(rewrite(src, src.len()),
+            Some("$wrap(top); { top; const top = 123; top; } $wrap(top);".into()));
+        let src = "top; function f(top) { return top + parent; } top;";
+        assert_eq!(rewrite(src, src.len()),
+            Some("$wrap(top); function f(top) { return top + $wrap(parent); } $wrap(top);".into()));
     }
     #[test]
     fn template_interpolations_and_chunk_boundaries() {
@@ -643,7 +616,7 @@ mod tests {
     #[test]
     fn fails_closed() {
         for s in [
-            "const location = 1;", "function f(location){return location}",
+            "const {location} = window;", "function f({location}){return location}",
             "location = x;", "eval('x')", "import('./x.js')",
             "with(x){location}", "obj.postMessage('x')", "const {location} = x",
         ] { assert!(rewrite(s,s.len()).is_none(),"{s:?}"); }
