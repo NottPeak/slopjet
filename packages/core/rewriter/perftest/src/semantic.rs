@@ -107,6 +107,30 @@ impl SemanticProgram {
             _ => false,
         }
     }
+    /// Disambiguate a slash following ')' without building an AST.
+    /// After an ordinary call, it is division; after a control condition,
+    /// it begins a regexp statement. Ambiguous syntax is still rejected.
+    fn after_control_condition(&self) -> bool {
+        let Some(last) = self.tokens.last() else { return false; };
+        if &self.source[last.start..last.end] != ")" { return false; }
+        let mut depth: usize = 0;
+        for i in (0..self.tokens.len()).rev() {
+            let tok = self.tokens[i];
+            let word = &self.source[tok.start..tok.end];
+            if word == ")" { depth += 1; }
+            else if word == "(" {
+                if depth == 0 { return false; }
+                depth -= 1;
+                if depth == 0 {
+                    if i == 0 { return false; }
+                    let prior = self.tokens[i-1];
+                    return matches!(&self.source[prior.start..prior.end],
+                        "if" | "while" | "for" | "with" | "switch");
+                }
+            }
+        }
+        false
+    }
     pub fn write(&mut self, chunk: &str) {
         if self.unsupported { return; }
         self.source.push_str(chunk);
@@ -210,12 +234,14 @@ impl SemanticProgram {
                         self.cursor += 1; self.mode = Mode::BlockComment; self.prev_star = false;
                     } else if self.regex_possible() {
                         self.mode = Mode::Regex; self.escaped = false; self.in_class = false;
+                    } else if self.after_control_condition() {
+                        self.mode = Mode::Regex;
+                        self.escaped = false;
+                        self.in_class = false;
                     } else if self.tokens.last().is_some_and(|t|
-                        matches!(&self.source[t.start..t.end], ")" | "}")
+                        &self.source[t.start..t.end] == "}"
                     ) {
-                        // Slash after a closing control condition may begin
-                        // a regexp statement, but after a call it is division.
-                        // Without grammar context, reject rather than corrupt.
+                        // Braces can close an object expression or statement.
                         self.unsupported = true;
                     } else { self.emit(Kind::Punct); }
                 }
@@ -531,6 +557,13 @@ mod tests {
             assert_eq!(engine.finish(), Some(expected.into()), "chunk {chunk}");
         }
         assert_eq!(rewrite("\u{feff}top;", 200), Some("\u{feff}$wrap(top);".into()));
+    }
+    #[test]
+    fn division_after_call_and_regex_after_control() {
+        assert_eq!(rewrite("const result = calc() / 2;", 100),
+            Some("const result = calc() / 2;".into()));
+        assert_eq!(rewrite("if (condition) /location/.test(text);", 100),
+            Some("if (condition) /location/.test(text);".into()));
     }
     #[test]
     fn partition_invariance() {
