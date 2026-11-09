@@ -349,7 +349,20 @@ impl SemanticProgram {
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
-            if w == "debugger" { return None; }
+            if w == "debugger" {
+                // Remove the debugger statement without perturbing its
+                // surrounding semicolon or comments. An identifier used as a
+                // property key is not a debugger statement.
+                if i>0 && self.is(i-1, ".") ||
+                    self.is(i+1, ":") || self.is(i+1, "(") {
+                    continue;
+                }
+                if i+1 == n || self.is(i+1, ";") || self.is(i+1, "}") {
+                    patch(&mut patches, i).replace = Some(String::new());
+                    continue;
+                }
+                return None;
+            }
 
             if w == "import" && self.is(i+1, ".") && self.is(i+2, "meta") {
                 if self.metafn.is_empty() || !self.is_module { return None; }
@@ -676,6 +689,13 @@ mod tests {
             .with_module_meta("$meta", true);
         engine.write("export {home} from './module.js';");
         assert!(engine.finish().is_none());
+    }
+    #[test]
+    fn removes_debugger_without_changing_script_semantics() {
+        assert_eq!(rewrite("debugger; top;", 200), Some("; $wrap(top);".into()));
+        assert_eq!(rewrite("function f(){debugger;return 7;}", 200),
+            Some("function f(){;return 7;}".into()));
+        assert_eq!(rewrite("obj.debugger;", 200), Some("obj.debugger;".into()));
     }
     #[test]
     fn supports_simple_classes_without_parser() {
