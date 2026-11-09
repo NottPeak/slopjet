@@ -124,3 +124,28 @@ test("hung workers time out and do not block later users", async () => {
   assert.ok(starts >= 2, "hung worker should have been replaced");
   pool.close();
 });
+
+test("transfers large request buffers without duplicating them", async () => {
+  class TransferWorker extends MockWorker {
+    postMessage(message, transfer) {
+      const cloned = structuredClone(message, { transfer });
+      queueMicrotask(() => {
+        for (const fn of this.handlers.message) {
+          fn({ data: {
+            id: cloned.id, ok: true,
+            result: Array.from(cloned.payload.source)
+          } });
+        }
+      });
+    }
+  }
+  const pool = new RequestPool({
+    workers: 1,
+    workerFactory: () => new TransferWorker(),
+  });
+  const source = Uint8Array.of(1, 2, 3, 255);
+  const outcome = pool.submit({ source }, [source.buffer]);
+  assert.equal(source.byteLength, 0, "ownership should transfer to worker");
+  assert.deepEqual(await outcome, [1, 2, 3, 255]);
+  pool.close();
+});
