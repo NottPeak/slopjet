@@ -79,4 +79,7 @@ wasm-bindgen JS module, and matching WASM binary on the controller origin.
     // On shutdown, call pool.close().
 
 Worker counts default to a hardware-concurrency-based value and can be
-overridden. Workers never split a source file into independent rewrite tasks.
+overridden. Worker jobs use Transferable buffers to avoid unnecessary
+request cloning and have a configurable 60-second default timeout. A hung
+worker is terminated and replaced so other requests can continue.
+Workers never split a source file into independent rewrite tasks.
