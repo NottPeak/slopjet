@@ -90,10 +90,24 @@ test("module metadata and named exports rewrite through compiled WASM", () => {
     }
   }
 });
+test("compiled WASM resolves shadowed globals in block and function scope", () => {
+  const cases = [
+    ["const location = 5; location;", "const location = 5; location;"],
+    ["function f(location){return location}", "function f(location){return location}"],
+    ["top; { let top = 3; top; } top;", "$wrap(top); { let top = 3; top; } $wrap(top);"],
+  ];
+  for (const [source, expected] of cases) {
+    assert.equal(rewrite(source), expected);
+    for (let n = 1; n < Math.min(source.length, 10); n++) {
+      assert.equal(stream(source, n), expected);
+    }
+  }
+});
+
 test("unsupported syntax is rejected, not passed through", () => {
   const invalid = [
-    "const location = 5;",
-    "function f(location){return location}",
+    "const {location} = window;",
+    "function f({location}){return location}",
     "location += '/path';",
     "import x from 'lib';",
     "eval(location, top)",
