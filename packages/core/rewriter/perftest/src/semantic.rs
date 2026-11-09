@@ -12,6 +12,9 @@ enum Mode { Code, Word, Number, Quote(u8), Template, Slash, Regex, RegexFlags,
 struct TemplateFrame { depth: usize, in_expression: bool }
 #[derive(Default)]
 struct Patch { before: String, replace: Option<String>, after: String }
+fn patch(slots: &mut [Option<Patch>], index: usize) -> &mut Patch {
+    slots[index].get_or_insert_with(Patch::default)
+}
 
 fn ident_start(b: u8) -> bool { b.is_ascii_alphabetic() || b == b'_' || b == b'$' }
 fn ident_cont(b: u8) -> bool { ident_start(b) || b.is_ascii_digit() }
@@ -56,8 +59,8 @@ impl SemanticProgram {
         }
     }
     pub fn write(&mut self, chunk: &str) {
-        self.source.push_str(chunk);
         if self.unsupported { return; }
+        self.source.push_str(chunk);
         while self.cursor < self.source.len() && !self.unsupported {
             let b = self.source.as_bytes()[self.cursor];
             match self.mode {
@@ -263,7 +266,7 @@ impl SemanticProgram {
             }
         }
         if !stack.is_empty() || !self.binding_safe(&pairs) { return None; }
-        let mut patches: Vec<Patch> = (0..n).map(|_| Patch::default()).collect();
+        let mut patches: Vec<Option<Patch>> = (0..n).map(|_| None).collect();
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
@@ -272,11 +275,11 @@ impl SemanticProgram {
             }
             if !unsafe_name(w) { continue; }
             if i>0 && self.is(i-1, ".") {
-                patches[i].replace = Some(format!("{}{}", self.propertybase, w));
+                patch(&mut patches, i).replace = Some(format!("{}{}", self.propertybase, w));
                 continue;
             }
             if self.is(i+1, ":") && i>0 && (self.is(i-1, "{") || self.is(i-1, ",")) {
-                patches[i].replace = Some(format!("{}{}", self.propertybase, w));
+                patch(&mut patches, i).replace = Some(format!("{}{}", self.propertybase, w));
                 continue;
             }
             if i>0 && self.is(i-1, "#") { continue; }
@@ -305,7 +308,7 @@ impl SemanticProgram {
                 self.is(i-1, "{") && self.tokens[i-1].kind != Kind::InterpolationOpen ||
                 self.is(i-1, ",")
             ) && (self.is(i+1, "}") || self.is(i+1, ",")) { return None; }
-            patches[i].replace = Some(format!("{}({})", self.wrapfn, w));
+            patch(&mut patches, i).replace = Some(format!("{}({})", self.wrapfn, w));
         }
         if !self.disable_computed {
             for i in 0..n {
@@ -326,18 +329,22 @@ impl SemanticProgram {
                 let plain_string = i+2 == end && self.tokens[i+1].kind == Kind::Literal &&
                     !unsafe_name(text.trim_matches(&['"', '\''][..]));
                 if numeric || plain_string { continue; }
-                patches[i+1].before.insert_str(0, &format!("{}((", self.propertyfn));
-                patches[end-1].after.push_str("))");
+                patch(&mut patches, i+1).before.insert_str(0, &format!("{}((", self.propertyfn));
+                patch(&mut patches, end-1).after.push_str("))");
             }
         }
         let mut out = String::with_capacity(self.source.len()+64);
         let mut at = 0;
         for (i,t) in self.tokens.iter().enumerate() {
             out.push_str(&self.source[at..t.start]);
-            out.push_str(&patches[i].before);
-            if let Some(rep) = &patches[i].replace { out.push_str(rep); }
-            else { out.push_str(&self.source[t.start..t.end]); }
-            out.push_str(&patches[i].after);
+            if let Some(change) = &patches[i] {
+                out.push_str(&change.before);
+                if let Some(rep) = &change.replace { out.push_str(rep); }
+                else { out.push_str(&self.source[t.start..t.end]); }
+                out.push_str(&change.after);
+            } else {
+                out.push_str(&self.source[t.start..t.end]);
+            }
             at = t.end;
         }
         out.push_str(&self.source[at..]);
