@@ -877,7 +877,8 @@ mod tests {
     #[test]
     fn rejects_member_eval_module_meta_and_method_property_ambiguity() {
         assert!(rewrite("const x = import.meta.url;", 40).is_none());
-        assert!(rewrite("const obj = {location(){return 1}};", 50).is_none());
+        assert_eq!(rewrite("const obj = {location(){return 1}};", 50),
+            Some("const obj = {location(){return 1}};".into()));
         let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
             .with_helpers("$import", "$rewrite", "$post", "https://example.test/");
         engine.write("window.eval('x')");
@@ -1021,7 +1022,8 @@ mod tests {
         let src = "class Test {constructor(value){this.value=value;}} const x=new Test(top);";
         assert_eq!(rewrite(src, src.len()), Some(
             "class Test {constructor(value){this.value=value;}} const x=new Test($wrap(top));".into()));
-        assert_eq!(rewrite("class X { location(){return top;} }", 100), None);
+        assert_eq!(rewrite("class X { location(){return top;} }", 100),
+            Some("class X { location(){return $wrap(top);} }".into()));
         assert_eq!(rewrite("class top { constructor(){} }", 100), None);
     }
     #[test]
@@ -1042,7 +1044,8 @@ mod tests {
     #[test]
     fn object_grammar_and_spread_identifiers() {
         assert!(rewrite("({location:x}=obj);", 50).is_none());
-        assert!(rewrite("const o={get location(){return 1}};", 60).is_none());
+        assert_eq!(rewrite("const o={get location(){return 1}};", 60),
+            Some("const o={get location(){return 1}};".into()));
         assert_eq!(rewrite("f(...location);", 60), Some("f(...$wrap(location));".into()));
         assert_eq!(rewrite("const o = {...top};", 60),
             Some("const o = {...$wrap(top)};".into()));
