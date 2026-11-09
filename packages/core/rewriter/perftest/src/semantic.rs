@@ -813,7 +813,10 @@ mod tests {
             Some("$post(foo)?.postMessage('x');".into()));
         assert_eq!(rewrite_with_helpers("getTarget().postMessage('x');"),
             Some("$post(getTarget()).postMessage('x');".into()));
-        assert_eq!(rewrite_with_helpers("foo.postMessage = fn;"), None);
+        assert_eq!(rewrite_with_helpers("foo.postMessage = fn;"),
+            Some("$post(foo).postMessage = fn;".into()));
+        assert_eq!(rewrite_with_helpers("foo.postMessage += fn;"),
+            Some("$post(foo).postMessage += fn;".into()));
     }
     #[test]
     fn preserves_direct_eval_with_extra_arguments() {
