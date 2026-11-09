@@ -77,7 +77,7 @@ function rewriteJsWasm(
 		// 	return { js: input, tag: "", map: null };
 		// }
 		if (flagEnabled("rewriterLogs", context, meta.base)) {
-			dbg.time(meta, before, `oxc rewrite for "${source || "(unknown)"}"`);
+			dbg.time(meta, before, `Rust scanner rewrite for "${source || "(unknown)"}"`);
 		}
 
 		const { js, map, scramtag, errors } = out;
@@ -137,7 +137,7 @@ export function rewriteJs(
 
 		if (flagEnabled("rewriterLogs", context, meta.base)) {
 			for (const error of res.errors) {
-				dbg.error("oxc parse error", error);
+				dbg.error("Rust scanner error", error);
 			}
 		}
 
@@ -149,10 +149,7 @@ export function rewriteJs(
 			err.message,
 			typeof js !== "string" ? TextDecoder_decode(js) : js
 		);
-		if (flagEnabled("allowInvalidJs", context, meta.base)) {
-			return js;
-		} else {
-			throw err;
-		}
+		// Never expose original, unrewritten JavaScript on a scanner error.
+		throw err;
 	}
 }
