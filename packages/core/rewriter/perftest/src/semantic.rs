@@ -18,6 +18,10 @@ fn patch(slots: &mut [Option<Patch>], index: usize) -> &mut Patch {
 
 fn ident_start(b: u8) -> bool { b.is_ascii_alphabetic() || b == b'_' || b == b'$' }
 fn ident_cont(b: u8) -> bool { ident_start(b) || b.is_ascii_digit() }
+fn unicode_start(c: char) -> bool { c.is_alphabetic() || c == '_' || c == '$' }
+fn unicode_continue(c: char) -> bool {
+    unicode_start(c) || c.is_numeric() || c == '\u{200c}' || c == '\u{200d}'
+}
 fn unsafe_name(s: &str) -> bool { matches!(s, "parent" | "top" | "location" | "eval") }
 fn not_object(s: &str) -> bool {
     matches!(s, "return" | "throw" | "case" | "delete" | "void" |
@@ -138,13 +142,30 @@ impl SemanticProgram {
                             if let Some(frame) = self.templates.last_mut() { frame.in_expression = false; }
                             self.mode = Mode::Template;
                         }
+                    } else if b == 0xef &&
+                        self.source[self.cursor..].starts_with('\u{feff}') {
+                        self.cursor += '\u{feff}'.len_utf8();
+                    } else if b >= 0x80 {
+                        let ch = self.source[self.cursor..].chars().next().unwrap();
+                        if ch.is_whitespace() {
+                            self.cursor += ch.len_utf8();
+                        } else if unicode_start(ch) {
+                            self.start = self.cursor;
+                            self.cursor += ch.len_utf8();
+                            self.mode = Mode::Word;
+                        } else { self.unsupported = true; }
                     } else if b.is_ascii_graphic() && b != 96 && b != b'\\' {
                         self.start = self.cursor; self.cursor += 1; self.emit(Kind::Punct);
                     } else { self.unsupported = true; }
                 }
                 Mode::Word => {
-                    if ident_cont(b) { self.cursor += 1; }
-                    else { self.emit(Kind::Word); }
+                    if ident_cont(b) {
+                        self.cursor += 1;
+                    } else if b >= 0x80 {
+                        let ch = self.source[self.cursor..].chars().next().unwrap();
+                        if unicode_continue(ch) { self.cursor += ch.len_utf8(); }
+                        else { self.emit(Kind::Word); }
+                    } else { self.emit(Kind::Word); }
                 }
                 Mode::Number => {
                     if b.is_ascii_alphanumeric() || b == b'.' || b == b'_' {
@@ -497,6 +518,19 @@ mod tests {
         assert_eq!(rewrite("const x = /location/gi; // location", 200),
             Some("const x = /location/gi; // location".into()));
         assert_eq!(rewrite("let x = 10 / 2;", 200), Some("let x = 10 / 2;".into()));
+    }
+    #[test]
+    fn unicode_identifiers_and_comments() {
+        let original = "const π = 3; const naïve = window.location; // 你好\nπ + naïve;";
+        let expected = "const π = 3; const naïve = window.$prop$location; // 你好\nπ + naïve;";
+        for chunk in 1..=original.len() {
+            let mut engine = SemanticProgram::new("$wrap", "$prop$", "$computed", false);
+            for ch in original.chars() {
+                engine.write(&ch.to_string());
+            }
+            assert_eq!(engine.finish(), Some(expected.into()), "chunk {chunk}");
+        }
+        assert_eq!(rewrite("\u{feff}top;", 200), Some("\u{feff}$wrap(top);".into()));
     }
     #[test]
     fn partition_invariance() {
