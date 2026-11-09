@@ -631,7 +631,30 @@ impl SemanticProgram {
                 if end > open+1 {
                     // Preserve the direct callee's reference and only rewrite
                     // its first argument; subsequent args retain side effects.
-                    if self.is(open+1, ".") { return None; } // spread
+                    if self.is(open+1, ".") {
+                        // A lone spread argument is still a direct eval call:
+                        // eval(...iterable) => eval(...rewritefn(iterable,true)).
+                        // Never rewrite a spread with extra call arguments
+                        // until their evaluation order has been modeled.
+                        if end <= open+4 || !self.is(open+2, ".") ||
+                            !self.is(open+3, ".") ||
+                            self.tokens[open+1].end != self.tokens[open+2].start ||
+                            self.tokens[open+2].end != self.tokens[open+3].start {
+                            return None;
+                        }
+                        let mut j = open+4;
+                        while j < end {
+                            if self.is(j, ",") { return None; }
+                            if matches!(self.word(j), "(" | "[" | "{") {
+                                j = pairs[j]? + 1;
+                            } else { j += 1; }
+                        }
+                        patch(&mut patches, open+4).before.insert_str(
+                            0, &format!("{}(", self.rewritefn)
+                        );
+                        patch(&mut patches, end-1).after.push_str(",true)");
+                        continue;
+                    }
                     let mut j = open+1;
                     let mut first_end = end;
                     while j < end {
