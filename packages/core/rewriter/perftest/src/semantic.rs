@@ -1072,6 +1072,8 @@ mod tests {
         for source in [
             "location ||= top;", "location &&= top;", "location ??= top;",
             "location = foo, sideEffect();",
+            "location + = top;", "location < < = top;",
+            "location +=\n top;",
         ] {
             let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
                 .with_assignment("$tryset");
