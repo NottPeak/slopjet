@@ -295,7 +295,10 @@ impl SemanticProgram {
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
-            if w == "with" { return false; }
+            if w == "with" && (i == 0 || !self.is(i-1, ".")) &&
+                !(self.is(i+1, ":") && i>0 && self.is(i-1, "{")) {
+                return false;
+            }
             // Classes with protected class names need class-environment
             // binding resolution and are conservatively rejected.
             if w == "class" && self.tokens.get(i+1).is_some_and(|_| unsafe_name(self.word(i+1))) {
@@ -307,6 +310,7 @@ impl SemanticProgram {
                     Some("const" | "let" | "var" | "function" | "default" | "async" | "{" | "*")
                 ) { return false; }
             }
+            if w == "import" && i>0 && self.is(i-1, ".") { continue; }
             if w == "import" && !(self.is(i+1, "(") ||
                 self.is_module && (self.is(i+1, ".") && self.is(i+2, "meta")
                     && !self.metafn.is_empty() || !self.is(i+1, "."))) {
@@ -367,6 +371,7 @@ impl SemanticProgram {
         for i in 0..n {
             let word = self.word(i);
             let is_import = word == "import" &&
+                (i==0 || !self.is(i-1, ".")) &&
                 !self.is(i+1, "(") && !self.is(i+1, ".");
             let is_export_from = word == "export" &&
                 (self.is(i+1, "{") || self.is(i+1, "*"));
@@ -428,13 +433,13 @@ impl SemanticProgram {
                 return None;
             }
 
-            if w == "import" && self.is(i+1, ".") && self.is(i+2, "meta") {
+            if w == "import" && (i==0 || !self.is(i-1, ".")) && self.is(i+1, ".") && self.is(i+2, "meta") {
                 if self.metafn.is_empty() || !self.is_module { return None; }
                 patch(&mut patches, i).before.insert_str(0, &format!("{}(", self.metafn));
                 patch(&mut patches, i+2).after.push_str(&format!(",{})", js_string(&self.base)));
                 continue;
             }
-            if w == "import" && self.is(i+1, "(") {
+            if w == "import" && (i==0 || !self.is(i-1, ".")) && self.is(i+1, "(") {
                 if self.importfn.is_empty() || self.base.is_empty() { return None; }
                 let end = pairs[i+1]?;
                 if end <= i+2 { return None; }
@@ -776,6 +781,13 @@ mod tests {
         assert_eq!(rewrite("({parent})", 100),
             Some("({parent:$wrap(parent)})".into()));
         assert_eq!(rewrite("{top}", 100), None);
+    }
+    #[test]
+    fn contextual_keywords_can_be_methods_or_properties() {
+        assert_eq!(rewrite("array.with(0, top);", 100),
+            Some("array.with(0, $wrap(top));".into()));
+        assert_eq!(rewrite("obj.import('./x');", 100),
+            Some("obj.import('./x');".into()));
     }
     #[test]
     fn static_module_specifiers_use_host_url_resolver() {
