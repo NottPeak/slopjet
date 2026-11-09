@@ -27,22 +27,7 @@ export function flagEnabled(
 
 	return value;
 }
-export type ParallelJsRewriteOptions = {
-    jsconfig: ScramjetConfig["globals"] & { prefix: string };
-    flags: ScramjetFlags;
-    base: string;
-    url: string;
-    isModule: boolean;
-};
-
 export type ScramjetInterface = {
-    /** Delegate complete OXC rewriting to a dedicated browser Worker when
-     * the controller can guarantee the default URI-component URL codec.
-     */
-    rewriteJsFullAsync?: (
-        input: Uint8Array,
-        options: ParallelJsRewriteOptions
-    ) => Promise<Uint8Array>;
 	/** Optional client-hosted parallel rewriter for safe AST-free subsets.
 	 * Service workers cannot spawn dedicated Workers, so this must be supplied
 	 * by a window/controller context and must return null for unsupported syntax.
