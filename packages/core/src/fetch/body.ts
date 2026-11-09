@@ -56,7 +56,7 @@ export async function rewriteBody(
 					return response.body;
 				}
 
-				let rewritten = await rewriteJsResponse(
+				let rewritten: string | Uint8Array = await rewriteJsResponse(
 					response,
 					response.url,
 					handler.context,
