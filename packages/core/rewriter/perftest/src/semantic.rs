@@ -597,15 +597,29 @@ impl SemanticProgram {
             // setter helper. RHS evaluation occurs once inside the wrapper.
             if w == "location" && self.is(i+1, "=") && !self.trysetfn.is_empty()
                 && (i == 0 || self.is(i-1, ";") || self.is(i-1, "{"))
-                && i+2 < n
-                && matches!(self.tokens[i+2].kind, Kind::Word | Kind::Number | Kind::Literal)
-                && (i+3 == n || self.is(i+3, ";")) {
+                && i+2 < n && !self.is(i+2, "=") && !self.is(i+2, ">") {
+                // A simple statement can have an entire RHS expression, not
+                // only one token. Scan to its top-level terminating semicolon
+                // or block end while skipping balanced nested expressions.
+                // We do not guess about ASI or unparenthesized comma operators.
+                let mut end = i+2;
+                while end < n && !self.is(end, ";") && !self.is(end, "}") {
+                    if self.is(end, ",") || self.is(end, ")") || self.is(end, "]") {
+                        return None;
+                    }
+                    if matches!(self.word(end), "(" | "[" | "{") {
+                        end = pairs[end]? + 1;
+                    } else { end += 1; }
+                }
+                if end == i+2 { return None; }
+                let rhs = &self.source[self.tokens[i+2].start..self.tokens[end-1].end];
+                if rhs.contains('\n') || rhs.contains('\r') { return None; }
                 patch(&mut patches, i).replace = Some(format!(
                     "((t)=>{}(location,\"=\",t)||(location=t))(",
                     self.trysetfn
                 ));
                 patch(&mut patches, i+1).replace = Some(String::new());
-                patch(&mut patches, i+2).after.push(')');
+                patch(&mut patches, end-1).after.push(')');
                 continue;
             }
             if (self.is(i+1, "=") && !self.is(i+2, "=") && !self.is(i+2, ">")) ||
