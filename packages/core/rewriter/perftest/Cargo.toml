@@ -7,6 +7,4 @@ publish = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 
-[dev-dependencies]
-js = { path = "../js", default-features = false }
-oxc = { workspace = true }
+[dependencies]
