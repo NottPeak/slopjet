@@ -18,6 +18,7 @@ import { RequestPool } from "./browser-pool.mjs";
 export function createPerftestPool({
   workers = Math.max(1, Math.floor((globalThis.navigator?.hardwareConcurrency ?? 2) / 2)),
   maxQueue = 1024,
+  timeoutMs = 60000,
   workerUrl = new URL("./wasm-worker.mjs", import.meta.url).href,
   wasmGlueUrl,
   wasmUrl,
@@ -34,7 +35,7 @@ export function createPerftestPool({
   const glueUrl = new URL(wasmGlueUrl, globalThis.location.href).href;
   const binaryUrl = new URL(wasmUrl, globalThis.location.href).href;
   return new RequestPool({
-    workers, maxQueue,
+    workers, maxQueue, timeoutMs,
     workerFactory() {
       const worker = new Worker(workerUrl, { type: "module" });
       worker.postMessage({ type: "init", glueUrl, wasmUrl: binaryUrl });
