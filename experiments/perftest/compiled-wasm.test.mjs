@@ -2,12 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const wasmModule = await import("../../packages/core/rewriter/wasm/out/wasm.js");
-const binary = await readFile(
+const wasm = await import("../../packages/core/rewriter/wasm/out/wasm.js");
+const bytes = await readFile(
   new URL("../../packages/core/rewriter/wasm/out/wasm_bg.wasm", import.meta.url)
 );
-const { initSync, PerftestRewriteSession, Rewriter } = wasmModule;
-initSync({ module: new WebAssembly.Module(binary) });
+wasm.initSync({ module: new WebAssembly.Module(bytes) });
 
 const cfg = {
   prefix: "/scramjet/",
@@ -25,64 +24,78 @@ const cfg = {
   tempunusedid: "$tempUnused",
 };
 const flags = {
-  sourcemaps: false,
-  captureErrors: false,
-  scramitize: false,
-  disableComputedWrap: false,
-  destructureRewrites: false,
+  sourcemaps: false, captureErrors: false, scramitize: false,
+  disableComputedWrap: false, destructureRewrites: false,
 };
 
-function scan(source, size = source.length) {
-  const scanner = new PerftestRewriteSession(
+function rewrite(source) {
+  const engine = new wasm.Rewriter();
+  try {
+    const output = engine.rewrite_js(
+      cfg, flags, () => { throw new Error("URL codec must not be invoked"); },
+      source, "https://example.com/", "test.js", false
+    );
+    assert.ok(output.js instanceof Uint8Array);
+    return new TextDecoder().decode(output.js);
+  } finally {
+    engine.free();
+  }
+}
+function stream(source, n = 1) {
+  const engine = new wasm.PerftestRewriteSession(
     cfg.wrapfn, cfg.wrappropertybase, cfg.wrappropertyfn, false
   );
   try {
-    for (let i = 0; i < source.length; i += size) {
-      scanner.write(source.slice(i, i + size));
+    for (let i = 0; i < source.length; i += n) {
+      engine.write(source.slice(i, i + n));
     }
-    return scanner.finish();
+    return engine.finish();
   } finally {
-    scanner.free();
+    engine.free();
   }
 }
 
-function legacy(source) {
-  const rewriter = new Rewriter();
-  try {
-    const out = rewriter.rewrite_js(
-      cfg, flags, (x) => encodeURIComponent(x),
-      source, "https://example.com/", "test.js", false
-    );
-    return new TextDecoder().decode(out.js);
-  } finally {
-    rewriter.free();
-  }
-}
-
-test("compiled WASM fast path matches OXC for supported programs", () => {
-  for (const source of [
-    "top;", "window.location;", "this.location;",
-    "'use strict'; top.location; window.location;",
-    "window[location];", "parent['top'];", "obj[foo];",
-  ]) {
-    const expected = legacy(source);
-    assert.equal(scan(source), expected, source);
-    for (let n = 1; n < Math.min(source.length, 12); n++) {
-      assert.equal(scan(source, n), expected, source + " chunk=" + n);
+test("the compiled standalone WASM engine rewrites ordinary JS expressions", () => {
+  const cases = [
+    ["const x = window.location.href;", "const x = window.$property$location.href;"],
+    ["function f(x){return x.location + top.location;}",
+      "function f(x){return x.$property$location + $wrap(top).$property$location;}"],
+    ["let x = obj[location];", "let x = obj[$wrapProperty(($wrap(location)))];"],
+    ["const x = /location/gi; // location", "const x = /location/gi; // location"],
+    ["let x = 10 / 2;", "let x = 10 / 2;"],
+  ];
+  for (const [source, expected] of cases) {
+    assert.equal(rewrite(source), expected, source);
+    for (let size = 1; size <= Math.min(12, source.length); size++) {
+      assert.equal(stream(source, size), expected, source + ": chunk " + size);
     }
   }
 });
 
-test("compiled WASM declines unsupported syntax with no output", () => {
-  for (const source of [
-    "const x = 1;",
-    "window.location; let window = customWindow;",
-    "const r = /foo/;",
-    "import('./x.js');",
-    "window?.location;",
-    "function f(x) { return x; }",
-  ]) {
-    assert.notEqual(typeof scan(source), "string", source);
-    assert.ok(legacy(source).length > 0, source);
+test("unsupported syntax is rejected, not passed through", () => {
+  const invalid = [
+    "const location = 5;",
+    "function f(location){return location}",
+    "location = '/path';",
+    "import('./mod.js')",
+    "eval('location')",
+    "obj.postMessage('hello')",
+  ];
+  for (const source of invalid) {
+    assert.notEqual(typeof stream(source), "string", source);
+    assert.throws(() => rewrite(source), /Unsupported JavaScript syntax/);
+  }
+});
+
+test("unsupported flags fail explicitly", () => {
+  const engine = new wasm.Rewriter();
+  try {
+    assert.throws(
+      () => engine.rewrite_js(cfg, { ...flags, sourcemaps: true }, () => "",
+        "top;", "https://example.com/", "t.js", false),
+      /not yet implemented/
+    );
+  } finally {
+    engine.free();
   }
 });
