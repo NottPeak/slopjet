@@ -112,3 +112,21 @@ fn eval_argument_runway_scripts_are_semantically_supported() {
         assert!(analyze(js).is_some(), "Runway eval program unsupported: {name}");
     }
 }
+
+
+#[test]
+fn locate_bare_location_assignment_gap() {
+    let variants = [
+        ("top", r##"location = "#target";"##),
+        ("inside-block", r##"{ location = "#target"; }"##),
+        ("inside-function", r##"function f() { location = "#target"; }"##),
+        ("inside-arrow", r##"const f = () => { location = "#target"; };"##),
+        ("inside-async-arrow", r##"runTest(async () => { location = "#target"; }, true);"##),
+        ("after-member-write", r##"runTest(async () => { location.hash="start"; location="#target"; }, true);"##),
+        ("with-promise", r##"runTest(async () => { location="#target"; await new Promise((r) => setTimeout(r, 300)); }, true);"##),
+    ];
+    let failures: Vec<_> = variants.iter().filter_map(|(name, src)| {
+        if analyze(src).is_none() { Some(*name) } else { None }
+    }).collect();
+    assert!(failures.is_empty(), "unsupported bare location variants: {failures:?}");
+}
