@@ -51,6 +51,7 @@ pub struct SemanticProgram {
     wrapfn: String, propertybase: String,
     propertyfn: String, disable_computed: bool,
     importfn: String, rewritefn: String, postmessagefn: String, base: String,
+    metafn: String, is_module: bool,
 }
 impl SemanticProgram {
     pub fn new(wrapfn: impl Into<String>, propertybase: impl Into<String>,
@@ -61,7 +62,8 @@ impl SemanticProgram {
             wrapfn: wrapfn.into(), propertybase: propertybase.into(),
             propertyfn: propertyfn.into(), disable_computed,
             importfn: String::new(), rewritefn: String::new(),
-            postmessagefn: String::new(), base: String::new() }
+            postmessagefn: String::new(), base: String::new(),
+            metafn: String::new(), is_module: false }
     }
     pub fn with_helpers(
         mut self, importfn: impl Into<String>, rewritefn: impl Into<String>,
@@ -71,6 +73,12 @@ impl SemanticProgram {
         self.rewritefn = rewritefn.into();
         self.postmessagefn = postmessagefn.into();
         self.base = base.into();
+        self
+    }
+
+    pub fn with_module_meta(mut self, metafn: impl Into<String>, is_module: bool) -> Self {
+        self.metafn = metafn.into();
+        self.is_module = is_module;
         self
     }
 
@@ -237,7 +245,8 @@ impl SemanticProgram {
             let w = self.word(i);
             if matches!(w, "export" | "with" | "class") { return false; }
             // import.meta and static imports need URL transformation.
-            if w == "import" && !self.is(i+1, "(") { return false; }
+            if w == "import" && !(self.is(i+1, "(") ||
+                self.is_module && !self.metafn.is_empty() && self.is(i+1, ".") && self.is(i+2, "meta")) { return false; }
             if matches!(w, "var" | "let" | "const") {
                 // Detect all binding names, including later comma-separated
                 // declarators. Nested initializer expressions are skipped.
@@ -306,6 +315,12 @@ impl SemanticProgram {
             let w = self.word(i);
             if w == "debugger" { return None; }
 
+            if w == "import" && self.is(i+1, ".") && self.is(i+2, "meta") {
+                if self.metafn.is_empty() || !self.is_module { return None; }
+                patch(&mut patches, i).before.insert_str(0, &format!("{}(", self.metafn));
+                patch(&mut patches, i+2).after.push_str(&format!(",{})", js_string(&self.base)));
+                continue;
+            }
             if w == "import" && self.is(i+1, "(") {
                 if self.importfn.is_empty() || self.base.is_empty() { return None; }
                 let end = pairs[i+1]?;
@@ -535,6 +550,16 @@ mod tests {
             .with_helpers("$import", "$rewrite", "$post", "https://example.test/");
         engine.write("window.eval('x')");
         assert_eq!(engine.finish(), Some("window.$prop$eval('x')".into()));
+    }
+    #[test]
+    fn rewrites_module_metadata_without_parser() {
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_helpers("$import", "$rewrite", "$post", "https://site.test/app.mjs")
+            .with_module_meta("$meta", true);
+        engine.write("const url = import.meta.url;");
+        assert_eq!(engine.finish(), Some(
+            "const url = $meta(import.meta,\"https://site.test/app.mjs\").url;".into()
+        ));
     }
     #[test]
     fn fails_closed() {
