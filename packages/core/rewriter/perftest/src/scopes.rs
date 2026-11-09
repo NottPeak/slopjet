@@ -216,7 +216,22 @@ impl ScopeIndex {
             if next_binding {
                 if matches!(words[i], "{" | "[") {
                     let close = pairs[i]?;
-                    if (i+1..close).any(|j| bit(words[j]) != 0) { return None; }
+                    if (i+1..close).any(|j| bit(words[j]) != 0) {
+                        // Track protected names in simple destructured
+                        // parameters, without accepting aliases, defaults, or
+                        // nested patterns whose bindings require grammar.
+                        // E.g. function f({location, top}) { ... } is safe:
+                        // those names are bound locals throughout this body.
+                        let mut j = i+1;
+                        while j < close {
+                            if words[j] == "," { j += 1; continue; }
+                            if !is_word[j] || (j+1 < close && words[j+1] != ",") {
+                                return None;
+                            }
+                            self.bind(scope, words[j], j);
+                            j += 1;
+                        }
+                    }
                     i = close+1; next_binding = false; continue;
                 }
                 if words[i] == "." { i += 1; continue; } // rest parameter
