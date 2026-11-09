@@ -471,23 +471,42 @@ impl SemanticProgram {
                 continue;
             }
 
-            if w == "eval" && self.is(i+1, "(") && !(i>0 && self.is(i-1, ".")) {
+            // A parenthesized eval callee is a direct eval under ECMAScript
+            // semantics, but has different token boundaries. Reject rather
+            // than accidentally make it indirect by wrapping the identifier.
+            if w == "eval" && i>0 && self.is(i-1, "(") &&
+                self.is(i+1, ")") && self.is(i+2, "(") {
+                return None;
+            }
+            if w == "eval" && self.is(i+1, "(") &&
+                (i==0 || !self.is(i-1, ".")) {
+                if scopes.shadowed(i, "eval") { continue; }
                 if self.rewritefn.is_empty() { return None; }
                 let end = pairs[i+1]?;
                 if end > i+2 {
+                    // Direct eval only uses its first argument as code.
+                    // Preserve evaluation of subsequent arguments and their
+                    // side effects, while wrapping exactly the first value.
+                    if self.is(i+2, ".") { return None; } // spread argument
                     let mut j = i+2;
+                    let mut first_end = end;
                     while j < end {
-                        if self.is(j, ",") { return None; }
+                        if self.is(j, ",") {
+                            first_end = j;
+                            break;
+                        }
                         if self.is(j, "(") || self.is(j, "[") || self.is(j, "{") {
                             j = pairs[j]? + 1;
                         } else { j += 1; }
                     }
-                    patch(&mut patches, i+2).before.insert_str(
-                        0, &format!("{}(", self.rewritefn)
-                    );
-                    patch(&mut patches, end-1).after.push(')');
+                    if first_end > i+2 {
+                        patch(&mut patches, i+2).before.insert_str(
+                            0, &format!("{}(", self.rewritefn)
+                        );
+                        patch(&mut patches, first_end-1).after.push(')');
+                    }
                 }
-                continue; // preserve direct-eval callee semantics
+                continue; // preserve the direct eval callee
             }
 
             if w == "new" && i+2 < n &&
@@ -727,6 +746,15 @@ mod tests {
         assert!(rewrite_with_helpers("import('./x',{with:{type:'json'}})").is_none());
     }
 
+    #[test]
+    fn preserves_direct_eval_with_extra_arguments() {
+        assert_eq!(rewrite_with_helpers("eval('x', sideEffect());"),
+            Some("eval($rewrite('x'), sideEffect());".into()));
+        assert_eq!(rewrite_with_helpers("eval(foo(1,2), bar);"),
+            Some("eval($rewrite(foo(1,2)), bar);".into()));
+        assert_eq!(rewrite_with_helpers("eval(...args)"), None);
+        assert_eq!(rewrite_with_helpers("(eval)('x')"), None);
+    }
     #[test]
     fn rejects_member_eval_module_meta_and_method_property_ambiguity() {
         assert!(rewrite("const x = import.meta.url;", 40).is_none());
