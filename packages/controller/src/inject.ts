@@ -193,8 +193,8 @@ export function load(init: Init) {
 		});
 		return;
 	}
-	if (!("WASM" in self)) {
-		throw new Error("WASM not found in global scope!");
+	if (!("WASM" in self) || typeof self.WASM !== "string") {
+		throw new Error("WASM base64 payload not found in global scope!");
 	}
 	const binaryWasm = atob(self.WASM);
     const wasm = new Uint8Array(binaryWasm.length);
