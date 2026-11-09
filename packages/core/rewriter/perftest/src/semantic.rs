@@ -1052,7 +1052,8 @@ mod tests {
             Some("eval($rewrite('x'), sideEffect());".into()));
         assert_eq!(rewrite_with_helpers("eval(foo(1,2), bar);"),
             Some("eval($rewrite(foo(1,2)), bar);".into()));
-        assert_eq!(rewrite_with_helpers("eval(...args)"), None);
+        assert_eq!(rewrite_with_helpers("eval(...args)"),
+            Some("eval(...$rewrite(args,true))".into()));
         assert_eq!(rewrite_with_helpers("(eval)('x')"),
             Some("(eval)($rewrite('x'))".into()));
     }
