@@ -479,8 +479,9 @@ impl SemanticProgram {
                 // final property in a chain. The helper binds postMessage
                 // to its actual owner and preserves optional null checks.
                 if self.postmessagefn.is_empty() || i<2 { return None; }
-                if self.is(i+1, "=") || self.is(i+1, "+") ||
-                    self.is(i+1, "-") { return None; } // method assignment
+                // The upstream visitor wraps the receiver for reads
+                // *and* assignments. Rejecting all assignments prevents
+                // otherwise valid scripts from loading in the proxy.
                 let optional = i>1 && self.is(i-2, "?");
                 let receiver_end = if optional { i.checked_sub(3)? } else { i-2 };
                 let mut start = receiver_end;
