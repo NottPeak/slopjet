@@ -61,13 +61,18 @@ fn create_output(source: &str) -> Result<JsRewriterOutput, JsValue> {
     Ok(JsRewriterOutput::from(JsValue::from(obj)))
 }
 
-fn rewrite(jsconfig: &Object, flags: &Object, source: &str) -> Result<JsRewriterOutput, JsValue> {
+fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str) -> Result<JsRewriterOutput, JsValue> {
     unsupported_flags(flags)?;
     let mut engine = SemanticProgram::new(
         get_str(jsconfig, "wrapfn")?,
         get_str(jsconfig, "wrappropertybase")?,
         get_str(jsconfig, "wrappropertyfn")?,
         get_flag(flags, "disableComputedWrap")?,
+    ).with_helpers(
+        get_str(jsconfig, "importfn")?,
+        get_str(jsconfig, "rewritefn")?,
+        get_str(jsconfig, "wrappostmessagefn")?,
+        base,
     );
     engine.write(source);
     let rewritten = engine.finish().ok_or_else(|| {
@@ -92,11 +97,11 @@ impl Rewriter {
         jsflags: &Object,
         _encode_url: Object,
         js: String,
-        _base: String,
+        base: String,
         _url: String,
         _module: bool,
     ) -> Result<JsRewriterOutput, JsValue> {
-        rewrite(jsconfig, jsflags, &js)
+        rewrite(jsconfig, jsflags, &js, &base)
     }
 
     pub fn rewrite_js_bytes(
@@ -111,7 +116,7 @@ impl Rewriter {
     ) -> Result<JsRewriterOutput, JsValue> {
         let source = String::from_utf8(js)
             .map_err(|error| JsValue::from_str(&format!("invalid UTF-8: {error}")))?;
-        rewrite(jsconfig, jsflags, &source)
+        rewrite(jsconfig, jsflags, &source, &base)
     }
 }
 
@@ -130,11 +135,15 @@ impl PerftestRewriteSession {
         propertybase: String,
         propertyfn: String,
         disable_computed_wrap: bool,
+        importfn: String,
+        rewritefn: String,
+        postmessagefn: String,
+        base: String,
     ) -> PerftestRewriteSession {
         PerftestRewriteSession {
             scanner: Some(SemanticProgram::new(
                 wrapfn, propertybase, propertyfn, disable_computed_wrap
-            )),
+            ).with_helpers(importfn, rewritefn, postmessagefn, base)),
         }
     }
 
