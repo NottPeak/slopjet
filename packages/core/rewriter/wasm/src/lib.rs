@@ -110,7 +110,7 @@ impl Rewriter {
         jsflags: &Object,
         _encode_url: Object,
         js: Vec<u8>,
-        _base: String,
+        base: String,
         _url: String,
         _module: bool,
     ) -> Result<JsRewriterOutput, JsValue> {
