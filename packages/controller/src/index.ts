@@ -210,6 +210,10 @@ export type PerftestWorkerPool = {
             propertybase: string;
             propertyfn: string;
             disableComputedWrap: boolean;
+            importfn: string;
+            rewritefn: string;
+            postmessagefn: string;
+            base: string;
         };
     }): Promise<string>;
 };
