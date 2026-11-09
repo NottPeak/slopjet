@@ -1,14 +1,23 @@
-//! Run with: cargo run --release -p slopjet-perftest-scanner --example throughput
-//! Measures real token-span semantic rewriting for concurrent independent requests.\n//! It does not measure OXC, browser worker startup, or real network latency.
+//! Run: cargo run --release -p slopjet-perftest-scanner --example throughput -- 200
+//! Measures the real semantic scanner under independent-request load.
+//! This is not a browser, wire-network, or OXC comparison benchmark.
 use slopjet_perftest_scanner::requests::{process_sequential, Request};
 #[cfg(not(target_arch = "wasm32"))]
 use slopjet_perftest_scanner::requests::process_parallel;
 use std::time::Instant;
 
 fn main() {
-    let count = std::env::args().nth(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(1000);
-    let source = concat!(\n        "const url = window.location.href;\n",\n        "function f(top){return top + parent.location;}\n",\n        "const value = obj[location];\n",\n        "const message = `host=${top.location}`;\n",\n    ).repeat(100);
-    let requests: Vec<_> = (0..count).map(|i| Request { id: i as u64, source: source.clone() }).collect();
+    let count = std::env::args().nth(1)
+        .and_then(|s| s.parse::<usize>().ok()).unwrap_or(1000);
+    let source = concat!(
+        "const url = window.location.href;\n",
+        "function f(top){return top + parent.location;}\n",
+        "const value = obj[location];\n",
+        "const message = \u{60}host=${top.location}\u{60};\n",
+    ).repeat(100);
+    let requests: Vec<_> = (0..count)
+        .map(|i| Request { id: i as u64, source: source.clone() })
+        .collect();
     let bytes = count * source.len();
     let start = Instant::now();
     let baseline = process_sequential(requests.clone());
