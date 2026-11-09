@@ -248,7 +248,13 @@ impl SemanticProgram {
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
-            if matches!(w, "export" | "with" | "class") { return false; }
+            if matches!(w, "with" | "class") { return false; }
+            if w == "export" {
+                if !self.is_module || !matches!(
+                    self.tokens.get(i+1).map(|_| self.word(i+1)),
+                    Some("const" | "let" | "var" | "function" | "default" | "async")
+                ) { return false; }
+            }
             // import.meta and static imports need URL transformation.
             if w == "import" && !(self.is(i+1, "(") ||
                 self.is_module && !self.metafn.is_empty() && self.is(i+1, ".") && self.is(i+2, "meta")) { return false; }
@@ -589,6 +595,19 @@ mod tests {
         assert_eq!(engine.finish(), Some(
             "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top));".into()
         ));
+    }
+    #[test]
+    fn supports_exported_declarations_without_ast() {
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_module_meta("$meta", true);
+        engine.write("export const home = window.location.href;");
+        assert_eq!(engine.finish(), Some(
+            "export const home = window.$prop$location.href;".into()
+        ));
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_module_meta("$meta", true);
+        engine.write("export {home} from './module.js';");
+        assert!(engine.finish().is_none());
     }
     #[test]
     fn fails_closed() {
