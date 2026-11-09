@@ -1037,6 +1037,37 @@ mod tests {
         }
     }
     #[test]
+    fn compound_location_assignment_preserves_operator_and_rhs_evaluation() {
+        for (source, expected) in [
+            ("location += top;", "((t)=>$tryset(location,\"+=\",t)||(location+=t))(  $wrap(top));"),
+            ("location -= 2;", "((t)=>$tryset(location,\"-=\",t)||(location-=t))(  2);"),
+            ("location *= top;", "((t)=>$tryset(location,\"*=\",t)||(location*=t))(  $wrap(top));"),
+            ("location <<= parent;", "((t)=>$tryset(location,\"<<=\",t)||(location<<=t))(  $wrap(parent));"),
+            ("location **= top;", "((t)=>$tryset(location,\"**=\",t)||(location**=t))(  $wrap(top));"),
+            ("location+=top;", "((t)=>$tryset(location,\"+=\",t)||(location+=t))($wrap(top));"),
+        ] {
+            let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+                .with_assignment("$tryset");
+            engine.write(source);
+            assert_eq!(engine.finish(), Some(expected.into()), "{source}");
+        }
+        for source in [
+            "location ||= top;", "location &&= top;", "location ??= top;",
+            "location = foo, sideEffect();",
+        ] {
+            let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+                .with_assignment("$tryset");
+            engine.write(source);
+            assert!(engine.finish().is_none(), "must reject {source}");
+        }
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_assignment("$tryset");
+        engine.write("let location = 0; location += top;");
+        assert_eq!(engine.finish(),
+            Some("let location = 0; location += $wrap(top);".into()));
+    }
+
+    #[test]
     fn supports_exported_declarations_without_ast() {
         let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
             .with_module_meta("$meta", true);
