@@ -1,0 +1,86 @@
+name: Slopjet perftest
+on:
+  push:
+    branches: [perftest]
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/core/rewriter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Ensure standalone WASM runtime has no parser dependency
+        run: |
+          if cargo tree -p wasm --edges normal | grep -Ei 'oxc|swc_ecma|babel'; then
+            echo "Unexpected AST/parser dependency in standalone runtime"
+            exit 1
+          fi
+      - name: Validate experimental crate
+        run: cargo test -p slopjet-perftest-scanner
+      - name: Compile wasm rewriter with experimental feature
+        run: cargo check -p wasm --features perftest --target wasm32-unknown-unknown
+      - name: Run request-throughput smoke benchmark
+        run: cargo run --release -p slopjet-perftest-scanner --example throughput -- 200
+  browser-pool:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test experiments/perftest/browser-pool.test.mjs experiments/perftest/wasm-worker.test.mjs
+
+  types:
+    runs-on: ubuntu-latest
+    needs: compiled-wasm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: standalone-wasm-bindings
+          path: packages/core/rewriter/wasm/out
+      - name: Typecheck core declarations
+        run: pnpm --dir packages/core exec tsc -p tsconfig.types.json --pretty false
+      - name: Typecheck controller declarations
+        run: pnpm --dir packages/core exec tsc -p ../controller/tsconfig.types.json --pretty false
+
+  compiled-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-rewriter-toolchain
+        with:
+          wasm-bindgen-version: '0.2.105'
+          rewriter-path: packages/core/rewriter
+          github-token: ${{ github.token }}
+      - name: Build standalone WASM scanner
+        working-directory: packages/core/rewriter/wasm
+        run: bash build.sh
+      - name: Upload generated WASM bindings for strict typecheck
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-wasm-bindings
+          path: packages/core/rewriter/wasm/out/**
+      - name: Run browser-facing WASM contract tests
+        run: node --test experiments/perftest/compiled-wasm.test.mjs experiments/perftest/syntax-parity.test.mjs
+      - name: Benchmark compiled WASM request-level worker scaling
+        run: node experiments/perftest/node-wasm-bench.mjs 60

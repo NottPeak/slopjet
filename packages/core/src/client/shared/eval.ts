@@ -6,20 +6,27 @@ export default function (client: ScramjetClient, self: Self) {
 	// used for proxying *direct eval*
 	// eval("...") -> eval($scramjet$rewrite("..."))
 	Object_defineProperty(self, client.config.globals.rewritefn, {
-		value: function (js: any) {
-			// if eval is called on anything other than a string, we should just return it unchanged
-			// the one exception is TrustedScript, which can just be stringified and rewritten
+		value: function (js: any, spread = false) {
+			// A direct eval whose first argument is a spread expression must
+			// remain a direct eval call. The scanner transforms eval(...value)
+			// into eval(...rewritefn(value, true)), not an indirect call.
+			// Native spread iterates exactly once and preserves a TypeError for
+			// non-iterables. Convert only the first argument, as eval does.
+			if (spread) {
+				const args = [...js];
+				if (args.length) {
+					let first = args[0];
+					if (client.box.instanceof(first, "TrustedScript")) first = String(first);
+					if (typeof first === "string") {
+						first = rewriteJs(first, "(direct eval proxy)", client.context, client.meta);
+					}
+					args[0] = first;
+				}
+				return args;
+			}
 			if (client.box.instanceof(js, "TrustedScript")) js = String(js);
 			if (typeof js !== "string") return js;
-
-			const rewritten = rewriteJs(
-				js,
-				"(direct eval proxy)",
-				client.context,
-				client.meta
-			);
-
-			return rewritten;
+			return rewriteJs(js, "(direct eval proxy)", client.context, client.meta);
 		},
 		writable: false,
 		configurable: false,

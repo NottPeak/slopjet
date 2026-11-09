@@ -467,8 +467,8 @@ export class ScramjetClient {
 						const frame = client.descriptors.get(
 							"window.frameElement",
 							client.global
-						);
-						if (!frame.name) {
+						) as HTMLIFrameElement | null;
+						if (!frame?.name) {
 							// the parent frame is not scramjet-controlled, so we can't get a parent frame name
 							dbg.error(
 								"YOU NEED TO USE `new ScramjetFrame()`! DIRECT IFRAMES WILL NOT WORK"
@@ -752,11 +752,14 @@ return { apply, construct };
 					return applyFn(ctx.fn, ctx.this, ctx.args);
 				}
 
-				const pst = Error.prepareStackTrace;
+				const StackError = Error as typeof Error & {
+                    prepareStackTrace?: (error: Error, trace: Array<{ getFileName(): string | null }>) => unknown;
+                };
+                const pst = StackError.prepareStackTrace;
 
 				// eslint-disable-next-line @typescript-eslint/no-this-alias
 				const client = this;
-				Error.prepareStackTrace = function (err, s) {
+				StackError.prepareStackTrace = function (err, s) {
 					if (
 						s[0].getFileName() &&
 						!s[0].getFileName().startsWith(client.context.prefix.href)
@@ -775,20 +778,20 @@ return { apply, construct };
 							// eslint-disable-next-line scramjet-core/no-globals
 							console.error("ERROR FROM SCRAMJET INTERNALS", err);
 							if (!this.flagEnabled("allowFailedIntercepts")) {
-								Error.prepareStackTrace = pst;
+								StackError.prepareStackTrace = pst;
 								throw err;
 							}
 						} else {
-							Error.prepareStackTrace = pst;
+							StackError.prepareStackTrace = pst;
 							throw err;
 						}
 					} else {
-						Error.prepareStackTrace = pst;
+						StackError.prepareStackTrace = pst;
 						throw err;
 					}
 				}
 
-				Error.prepareStackTrace = pst;
+				StackError.prepareStackTrace = pst;
 
 				if (earlyreturn) {
 					return returnValue;

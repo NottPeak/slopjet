@@ -1,144 +1,186 @@
-pub mod error;
-
-use error::{Result, RewriterError};
-use js::cfg::{Config, Flags};
-use js_sys::{Object, Reflect};
-use jsr::{JsRewriter, JsRewriterOutput, create_js, create_js_output};
-use oxc::allocator::Allocator;
+//! Slopjet experimental Rust/WASM rewriter.
+//!
+//! The rewrite path is implemented by the independent lexical engine crate.
+//! No OXC parser, allocator, or fallback is linked into this WASM module.
+//! Unrecognized syntax is rejected rather than emitted without protection.
+use js_sys::{Array, Function, Math, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
-use crate::jsr::{WasmUrlRewriter, get_url_rewriter, scramtag};
+use slopjet_perftest_scanner::semantic::SemanticProgram;
 
-mod jsr;
+#[wasm_bindgen(typescript_custom_section)]
+const REWRITER_OUTPUT: &str = r#"
+export type JsRewriterOutput = {
+    js: Uint8Array,
+    map: Uint8Array,
+    scramtag: string,
+    errors: string[],
+};
+"#;
 
 #[wasm_bindgen]
 extern "C" {
-	#[wasm_bindgen(js_namespace = console, js_name = error)]
-	fn console_error(s: &str);
-	#[wasm_bindgen(js_namespace = console, js_name = error)]
-	fn console_error2(s: &JsValue);
+    #[wasm_bindgen(typescript_type = "JsRewriterOutput")]
+    pub type JsRewriterOutput;
 }
 
-fn get_obj(obj: &JsValue, k: &'static str) -> Result<JsValue> {
-	Ok(Reflect::get(obj, &k.into())?)
+fn get_str(obj: &Object, field: &str) -> Result<String, JsValue> {
+    Reflect::get(obj, &JsValue::from_str(field))?
+        .as_string()
+        .ok_or_else(|| JsValue::from_str(&format!("missing string config: {field}")))
 }
 
-fn get_str(obj: &JsValue, k: &'static str) -> Result<String> {
-	Reflect::get(obj, &k.into())?
-		.as_string()
-		.ok_or_else(|| RewriterError::not_str(k))
-}
-fn get_bool(obj: &JsValue, k: &'static str) -> Result<bool> {
-	Reflect::get(obj, &k.into())?
-		.as_bool()
-		.ok_or_else(|| RewriterError::not_bool(k))
+fn get_flag(obj: &Object, field: &str) -> Result<bool, JsValue> {
+    Reflect::get(obj, &JsValue::from_str(field))?
+        .as_bool()
+        .ok_or_else(|| JsValue::from_str(&format!("missing boolean flag: {field}")))
 }
 
-fn set_obj(obj: &Object, k: &str, v: &JsValue) -> Result<()> {
-	if Reflect::set(&obj.into(), &k.into(), v)? {
-		Ok(())
-	} else {
-		Err(RewriterError::ReflectSetFail(k.to_string()))
-	}
+fn set(obj: &Object, name: &str, value: &JsValue) -> Result<(), JsValue> {
+    if Reflect::set(obj, &JsValue::from_str(name), value)? { Ok(()) }
+    else { Err(JsValue::from_str("failed to create WASM output")) }
 }
 
-fn get_js_config(config: &Object) -> Result<Config> {
-	Ok(Config {
-		prefix: get_str(config, "prefix")?,
-
-		wrapfn: get_str(config, "wrapfn")?,
-		wrappropertybase: get_str(config, "wrappropertybase")?,
-		wrappropertyfn: get_str(config, "wrappropertyfn")?,
-		cleanrestfn: get_str(config, "cleanrestfn")?,
-		importfn: get_str(config, "importfn")?,
-		rewritefn: get_str(config, "rewritefn")?,
-		wrappostmessagefn: get_str(config, "wrappostmessagefn")?,
-		metafn: get_str(config, "metafn")?,
-		pushsourcemapfn: get_str(config, "pushsourcemapfn")?,
-
-		trysetfn: get_str(config, "trysetfn")?,
-		templocid: get_str(config, "templocid")?,
-		tempunusedid: get_str(config, "tempunusedid")?,
-	})
+fn unsupported_flags(flags: &Object) -> Result<(), JsValue> {
+    for name in ["sourcemaps", "captureErrors", "scramitize", "destructureRewrites"] {
+        if get_flag(flags, name)? {
+            return Err(JsValue::from_str(&format!(
+                "{name} is not yet implemented in the no-parser rewrite engine"
+            )));
+        }
+    }
+    Ok(())
 }
 
-fn get_js_flags(obj: &Object, base: String, is_module: bool) -> Result<Flags> {
-	Ok(Flags {
-		base,
-		sourcetag: scramtag(),
-		is_module,
+fn create_output(source: &str) -> Result<JsRewriterOutput, JsValue> {
+    let obj = Object::new();
+    set(&obj, "js", &Uint8Array::from(source.as_bytes()).into())?;
+    set(&obj, "map", &Uint8Array::from(&[0u8, 0, 0, 0][..]).into())?;
+    set(&obj, "scramtag", &JsValue::from_str(&format!("slopjet-{}", Math::random())))?;
+    set(&obj, "errors", &Array::new().into())?;
+    Ok(JsRewriterOutput::from(JsValue::from(obj)))
+}
 
-		do_sourcemaps: get_bool(obj, "sourcemaps")?,
-		capture_errors: get_bool(obj, "captureErrors")?,
-		scramitize: get_bool(obj, "scramitize")?,
-		disable_computed_wrap: get_bool(obj, "disableComputedWrap")?,
-		destructure_rewrites: get_bool(obj, "destructureRewrites")?,
-
-	})
+fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str, module: bool, url_rewriter: &Function) -> Result<JsRewriterOutput, JsValue> {
+    unsupported_flags(flags)?;
+    let mut engine = SemanticProgram::new(
+        get_str(jsconfig, "wrapfn")?,
+        get_str(jsconfig, "wrappropertybase")?,
+        get_str(jsconfig, "wrappropertyfn")?,
+        get_flag(flags, "disableComputedWrap")?,
+    ).with_helpers(
+        get_str(jsconfig, "importfn")?,
+        get_str(jsconfig, "rewritefn")?,
+        get_str(jsconfig, "wrappostmessagefn")?,
+        base,
+    ).with_module_meta(get_str(jsconfig, "metafn")?, module)
+     .with_assignment(get_str(jsconfig, "trysetfn")?);
+    engine.write(source);
+    let mut url_error = None;
+    let rewritten = engine.finish_with_url_rewriter(|specifier| {
+        match url_rewriter.call1(&JsValue::NULL, &JsValue::from_str(specifier)) {
+            Ok(value) => value.as_string(),
+            Err(error) => {
+                url_error = Some(error);
+                None
+            }
+        }
+    });
+    if let Some(error) = url_error { return Err(error); }
+    let rewritten = rewritten.ok_or_else(|| JsValue::from_str(
+        "Unsupported JavaScript syntax in standalone Slopjet rewriter",
+    ))?;
+    create_output(&rewritten)
 }
 
 #[wasm_bindgen]
-pub struct Rewriter {
-	alloc: Allocator,
-
-	js: JsRewriter,
-}
+pub struct Rewriter {}
 
 #[wasm_bindgen]
 impl Rewriter {
-	#[wasm_bindgen(constructor)]
-	pub fn new() -> Result<Self> {
-		Ok(Self {
-			alloc: Allocator::default(),
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Rewriter { Rewriter {} }
 
-			js: create_js()?
-		})
-	}
+    pub fn rewrite_js(
+        &mut self,
+        jsconfig: &Object,
+        jsflags: &Object,
+        rewrite_url: Function,
+        js: String,
+        base: String,
+        _url: String,
+        module: bool,
+    ) -> Result<JsRewriterOutput, JsValue> {
+        rewrite(jsconfig, jsflags, &js, &base, module, &rewrite_url)
+    }
 
-	#[wasm_bindgen]
-	pub fn rewrite_js(
-		&mut self,
-		jsconfig: &Object,
-		jsflags: &Object,
-		encode_url: Object,
-		js: String,
-		base: String,
-		url: String,
-		module: bool,
-	) -> Result<JsRewriterOutput> {
-		let config = get_js_config(jsconfig)?;
-		let flags = get_js_flags(jsflags, base, module)?;
-		let rewriter = get_url_rewriter(encode_url)?;
+    pub fn rewrite_js_bytes(
+        &mut self,
+        jsconfig: &Object,
+        jsflags: &Object,
+        rewrite_url: Function,
+        js: Vec<u8>,
+        base: String,
+        _url: String,
+        module: bool,
+    ) -> Result<JsRewriterOutput, JsValue> {
+        let source = String::from_utf8(js)
+            .map_err(|error| JsValue::from_str(&format!("invalid UTF-8: {error}")))?;
+        rewrite(jsconfig, jsflags, &source, &base, module, &rewrite_url)
+    }
+}
 
-		let out = match self.js.rewrite(&self.alloc, &js, config, flags, &rewriter) {
-			Ok(x) => x,
-			Err(x) => {
-				self.alloc.reset();
-				Err(x)?
-			}
-		};
+/// One forward scanner with deferred output and request-private state.
+/// Unsupported syntax yields null. Network handlers must reject such requests.
+#[wasm_bindgen]
+pub struct PerftestRewriteSession {
+    scanner: Option<SemanticProgram>,
+}
 
-		let ret = create_js_output(out, url, js);
+#[wasm_bindgen]
+impl PerftestRewriteSession {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        wrapfn: String,
+        propertybase: String,
+        propertyfn: String,
+        disable_computed_wrap: bool,
+        importfn: String,
+        rewritefn: String,
+        postmessagefn: String,
+        base: String,
+        metafn: String,
+        module: bool,
+        trysetfn: String,
+    ) -> PerftestRewriteSession {
+        PerftestRewriteSession {
+            scanner: Some(SemanticProgram::new(
+                wrapfn, propertybase, propertyfn, disable_computed_wrap
+            ).with_helpers(importfn, rewritefn, postmessagefn, base)
+             .with_module_meta(metafn, module)
+             .with_assignment(trysetfn)),
+        }
+    }
 
-		self.alloc.reset();
-		ret
-	}
+    pub fn write(&mut self, chunk: &str) -> Result<(), JsValue> {
+        self.scanner.as_mut()
+            .ok_or_else(|| JsValue::from_str("scanner already finalized"))?
+            .write(chunk);
+        Ok(())
+    }
 
-	#[wasm_bindgen]
-	pub fn rewrite_js_bytes(
-		&mut self,
-		jsconfig: &Object,
-		jsflags: &Object,
-		encode_url: Object,
-		js: Vec<u8>,
-		base: String,
-		url: String,
-		module: bool,
-	) -> Result<JsRewriterOutput> {
-		// SAFETY: we know the js is a valid utf-8 string
-		let js = unsafe { std::string::String::from_utf8_unchecked(js) };
-
-		self.rewrite_js(jsconfig, jsflags, encode_url, js, base, url, module)
-	}
-
+    pub fn finish(&mut self, rewrite_url: Option<Function>) -> Result<Option<String>, JsValue> {
+        let scanner = self.scanner.take()
+            .ok_or_else(|| JsValue::from_str("scanner already finalized"))?;
+        let Some(callback) = rewrite_url else { return Ok(scanner.finish()); };
+        let mut url_error = None;
+        let rewritten = scanner.finish_with_url_rewriter(|specifier| {
+            match callback.call1(&JsValue::NULL, &JsValue::from_str(specifier)) {
+                Ok(value) => value.as_string(),
+                Err(error) => { url_error = Some(error); None }
+            }
+        });
+        if let Some(error) = url_error { return Err(error); }
+        Ok(rewritten)
+    }
 }

@@ -2,7 +2,7 @@ import { iswindow } from "@client/entry";
 import { SCRAMJETCLIENT } from "@/symbols";
 import { ScramjetClient } from "@client/index";
 // import { argdbg } from "@client/shared/err";
-import { Object_defineProperty } from "@/shared/snapshot";
+import { Object_defineProperty, Reflect_ownKeys, String as NativeString } from "@/shared/snapshot";
 
 export function createWrapFn(client: ScramjetClient, self: GlobalThis) {
 	let wrappedParent: GlobalThis | null = null;
@@ -11,7 +11,7 @@ export function createWrapFn(client: ScramjetClient, self: GlobalThis) {
 		try {
 			if (SCRAMJETCLIENT in self.parent) {
 				// ... then we're in a subframe, and the parent frame is also in a proxy context, so we should return its proxy
-				wrappedParent = self.parent;
+				wrappedParent = self.parent as unknown as GlobalThis;
 			} else {
 				// ... then we should pretend we aren't nested and return the current window
 				wrappedParent = self;
@@ -64,7 +64,22 @@ export default function (client: ScramjetClient, self: GlobalThis) {
 		enumerable: false,
 	});
 	Object_defineProperty(self, client.config.globals.wrappropertyfn, {
-		value: function (str) {
+		value: function (str, privilegedRoot = false) {
+			// Dynamic lookups on globalThis/window/top/parent must not expose
+			// unvirtualized constructors. Convert the property key exactly once,
+			// preserving Symbols and object Symbol.toPrimitive behavior. The
+			// private helper and its captured intrinsics cannot be shadowed by
+			// variables in an intercepted page's script.
+			if (privilegedRoot) {
+				const kind = typeof str;
+				const key = (kind === "object" && str !== null) || kind === "function"
+					? Reflect_ownKeys({ [str as PropertyKey]: true })[0]
+					: kind === "symbol" ? str : NativeString(str);
+				if (key === "Function" || key === "constructor" || key === "__proto__") {
+					throw new TypeError("Blocked unsafe privileged property access");
+				}
+				str = key;
+			}
 			if (
 				str === "location" ||
 				str === "parent" ||

@@ -1,5 +1,5 @@
 import { flagEnabled, ScramjetContext } from "@/shared";
-import { URLMeta } from "@rewriters/url";
+import { URLMeta, rewriteUrl } from "@rewriters/url";
 
 import { getRewriter, JsRewriterOutput } from "@rewriters/wasm";
 import {
@@ -12,7 +12,7 @@ import {
 } from "../snapshot";
 
 // eslint-disable-next-line scramjet-core/no-globals
-Error.stackTraceLimit = 50;
+(Error as typeof Error & { stackTraceLimit?: number }).stackTraceLimit = 50;
 
 type RewriterResult = {
 	js: string | Uint8Array;
@@ -45,7 +45,7 @@ function rewriteJsWasm(
 					prefix: context.prefix.pathname,
 				},
 				flagsobj,
-				context.interface.codecEncode,
+				(specifier: string) => rewriteUrl(specifier, context, meta, { isModule: true }),
 				input,
 				meta.base.href,
 				source || "(unknown)",
@@ -58,7 +58,7 @@ function rewriteJsWasm(
 					prefix: context.prefix.pathname,
 				},
 				flagsobj,
-				context.interface.codecEncode,
+				(specifier: string) => rewriteUrl(specifier, context, meta, { isModule: true }),
 				input,
 				meta.base.href,
 				source || "(unknown)",
@@ -77,7 +77,7 @@ function rewriteJsWasm(
 		// 	return { js: input, tag: "", map: null };
 		// }
 		if (flagEnabled("rewriterLogs", context, meta.base)) {
-			dbg.time(meta, before, `oxc rewrite for "${source || "(unknown)"}"`);
+			dbg.time(meta, before, `Rust scanner rewrite for "${source || "(unknown)"}"`);
 		}
 
 		const { js, map, scramtag, errors } = out;
@@ -126,9 +126,10 @@ export function rewriteJs(
 				const sourcemapfn = `${context.config.globals.pushsourcemapfn}([${res.map.join(",")}], "${res.tag}");`;
 
 				// don't put the sourcemap call before "use strict"
+				const sourceText = typeof newjs === "string" ? newjs : TextDecoder_decode(newjs);
 				const strictMode = new _RegExp(/^\s*(['"])use strict\1;?/);
-				if (strictMode.test(newjs)) {
-					newjs = newjs.replace(strictMode, `$&\n${sourcemapfn}`);
+				if (strictMode.test(sourceText)) {
+					newjs = sourceText.replace(strictMode, `$&\n${sourcemapfn}`);
 				} else {
 					newjs = `${sourcemapfn}\n${newjs}`;
 				}
@@ -137,22 +138,20 @@ export function rewriteJs(
 
 		if (flagEnabled("rewriterLogs", context, meta.base)) {
 			for (const error of res.errors) {
-				dbg.error("oxc parse error", error);
+				dbg.error("Rust scanner error", error);
 			}
 		}
 
 		return newjs;
 	} catch (err) {
+		// Production errors must not dump third-party script source (tokens,
+		// credentials and page data) into service worker or browser logs.
 		dbg.warn(
 			"failed rewriting js for",
 			url || "(unknown)",
-			err.message,
-			typeof js !== "string" ? TextDecoder_decode(js) : js
+			err instanceof Error ? err.message : String(err)
 		);
-		if (flagEnabled("allowInvalidJs", context, meta.base)) {
-			return js;
-		} else {
-			throw err;
-		}
+		// Never expose original, unrewritten JavaScript on a scanner error.
+		throw err;
 	}
 }

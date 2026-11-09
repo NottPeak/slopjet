@@ -28,6 +28,16 @@ export function flagEnabled(
 	return value;
 }
 export type ScramjetInterface = {
+	/** Optional client-hosted parallel rewriter for safe AST-free subsets.
+	 * Service workers cannot spawn dedicated Workers, so this must be supplied
+	 * by a window/controller context and must return null for unsupported syntax.
+	 */
+	rewriteJsFastAsync?: (input: Uint8Array, options: {
+		wrapfn: string;
+		propertybase: string;
+		propertyfn: string;
+		disableComputedWrap: boolean;
+	}) => Promise<string | null>;
 	codecEncode: (input: string) => string;
 	codecDecode: (input: string) => string;
 
