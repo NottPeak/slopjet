@@ -216,6 +216,7 @@ export type PerftestWorkerPool = {
             base: string;
             metafn: string;
             module: boolean;
+            trysetfn: string;
         };
     }): Promise<string>;
 };
