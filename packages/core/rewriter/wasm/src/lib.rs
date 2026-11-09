@@ -6,7 +6,7 @@
 use js_sys::{Array, Math, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
-use slopjet_perftest_scanner::stream::StreamingProgram;
+use slopjet_perftest_scanner::semantic::SemanticProgram;
 
 #[wasm_bindgen(typescript_custom_section)]
 const REWRITER_OUTPUT: &str = r#"
@@ -63,7 +63,7 @@ fn create_output(source: &str) -> Result<JsRewriterOutput, JsValue> {
 
 fn rewrite(jsconfig: &Object, flags: &Object, source: &str) -> Result<JsRewriterOutput, JsValue> {
     unsupported_flags(flags)?;
-    let mut engine = StreamingProgram::with_computed(
+    let mut engine = SemanticProgram::new(
         get_str(jsconfig, "wrapfn")?,
         get_str(jsconfig, "wrappropertybase")?,
         get_str(jsconfig, "wrappropertyfn")?,
@@ -119,7 +119,7 @@ impl Rewriter {
 /// Unsupported syntax yields null. Network handlers must reject such requests.
 #[wasm_bindgen]
 pub struct PerftestRewriteSession {
-    scanner: Option<StreamingProgram>,
+    scanner: Option<SemanticProgram>,
 }
 
 #[wasm_bindgen]
@@ -132,7 +132,7 @@ impl PerftestRewriteSession {
         disable_computed_wrap: bool,
     ) -> PerftestRewriteSession {
         PerftestRewriteSession {
-            scanner: Some(StreamingProgram::with_computed(
+            scanner: Some(SemanticProgram::new(
                 wrapfn, propertybase, propertyfn, disable_computed_wrap
             )),
         }
