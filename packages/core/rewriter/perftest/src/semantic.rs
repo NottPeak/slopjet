@@ -1118,7 +1118,7 @@ mod tests {
         assert!(engine.finish().is_none());
 
         let mut engine = SemanticProgram::new("$wrap", "$property", "$computed", false)
-            .with_limits(Limits { source_bytes: 100, tokens: 100, nesting: 2 });
+            .with_limits(Limits { source_bytes: 100, tokens: 100, nesting: 1 });
         engine.write("((top))");
         assert!(engine.finish().is_none());
     }
