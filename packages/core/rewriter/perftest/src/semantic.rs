@@ -295,7 +295,12 @@ impl SemanticProgram {
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
-            if matches!(w, "with" | "class") { return false; }
+            if w == "with" { return false; }
+            // Classes with protected class names need class-environment
+            // binding resolution and are conservatively rejected.
+            if w == "class" && self.tokens.get(i+1).is_some_and(|_| unsafe_name(self.word(i+1))) {
+                return false;
+            }
             if w == "export" {
                 if !self.is_module || !matches!(
                     self.tokens.get(i+1).map(|_| self.word(i+1)),
@@ -671,6 +676,14 @@ mod tests {
             .with_module_meta("$meta", true);
         engine.write("export {home} from './module.js';");
         assert!(engine.finish().is_none());
+    }
+    #[test]
+    fn supports_simple_classes_without_parser() {
+        let src = "class Test {constructor(value){this.value=value;}} const x=new Test(top);";
+        assert_eq!(rewrite(src, src.len()), Some(
+            "class Test {constructor(value){this.value=value;}} const x=new Test($wrap(top));".into()));
+        assert_eq!(rewrite("class X { location(){return top;} }", 100), None);
+        assert_eq!(rewrite("class top { constructor(){} }", 100), None);
     }
     #[test]
     fn object_grammar_and_spread_identifiers() {
