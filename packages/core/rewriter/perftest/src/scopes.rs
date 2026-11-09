@@ -93,6 +93,19 @@ impl ScopeIndex {
                 }
             }
         }
+        // The lexical scope of a for(let/const ...) binding includes its
+        // loop body but not the surrounding block. Until loop-region scopes
+        // are indexed, do not mark that name in an outer scope.
+        for i in 0..n {
+            if words[i] != "for" || words.get(i+1) != Some(&"(") { continue; }
+            let end = pairs[i+1]?;
+            for j in i+2..end {
+                if matches!(words[j], "let" | "const") &&
+                    j+1 < end && bit(words[j+1]) != 0 {
+                    return None;
+                }
+            }
+        }
         // Scan declarations with source-order independent resolution.
         for i in 0..n {
             if !matches!(words[i], "let" | "const" | "var") { continue; }
@@ -253,6 +266,23 @@ mod tests {
         assert!(scopes.shadowed(8, "top"));
         assert!(!scopes.shadowed(11, "top"));
         assert!(scopes.declaration(4));
+    }
+    #[test]
+    fn does_not_hoist_lexical_for_loop_bindings_to_outer_scope() {
+        let words = ["top", ";", "for", "(", "let", "top", "of", "[", "]",
+            ")", "{", "top", ";", "}", "top"];
+        let mut stack = vec![];
+        let mut pairs = vec![None; words.len()];
+        for (i, word) in words.iter().enumerate() {
+            if matches!(*word, "(" | "{" | "[") { stack.push(i); }
+            else if matches!(*word, ")" | "}" | "]") {
+                let open = stack.pop().unwrap();
+                pairs[i] = Some(open); pairs[open] = Some(i);
+            }
+        }
+        let lexical = words.iter().map(|w| w.chars().next()
+            .is_some_and(|ch| ch.is_alphabetic())).collect::<Vec<_>>();
+        assert!(ScopeIndex::new(&words, &lexical, &pairs).is_none());
     }
     #[test]
     fn var_binding_hoisted_to_root() {
