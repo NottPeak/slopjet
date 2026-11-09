@@ -1,243 +1,153 @@
-pub mod error;
-
-use error::{Result, RewriterError};
-use js::cfg::{Config, Flags};
-use js_sys::{Array, Object, Reflect, Uint8Array};
-use jsr::{JsRewriter, JsRewriterOutput, create_js, create_js_output};
-use oxc::allocator::Allocator;
+//! Slopjet experimental Rust/WASM rewriter.
+//!
+//! The rewrite path is implemented by the independent lexical engine crate.
+//! No OXC parser, allocator, or fallback is linked into this WASM module.
+//! Unrecognized syntax is rejected rather than emitted without protection.
+use js_sys::{Array, Math, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
-use crate::jsr::{WasmUrlRewriter, get_url_rewriter, scramtag};
+use slopjet_perftest_scanner::stream::StreamingProgram;
 
-mod jsr;
+#[wasm_bindgen(typescript_custom_section)]
+const REWRITER_OUTPUT: &str = r#"
+export type JsRewriterOutput = {
+    js: Uint8Array,
+    map: Uint8Array,
+    scramtag: string,
+    errors: string[],
+};
+"#;
 
 #[wasm_bindgen]
 extern "C" {
-	#[wasm_bindgen(js_namespace = console, js_name = error)]
-	fn console_error(s: &str);
-	#[wasm_bindgen(js_namespace = console, js_name = error)]
-	fn console_error2(s: &JsValue);
+    #[wasm_bindgen(typescript_type = "JsRewriterOutput")]
+    pub type JsRewriterOutput;
 }
 
-fn get_obj(obj: &JsValue, k: &'static str) -> Result<JsValue> {
-	Ok(Reflect::get(obj, &k.into())?)
+fn get_str(obj: &Object, field: &str) -> Result<String, JsValue> {
+    Reflect::get(obj, &JsValue::from_str(field))?
+        .as_string()
+        .ok_or_else(|| JsValue::from_str(&format!("missing string config: {field}")))
 }
 
-fn get_str(obj: &JsValue, k: &'static str) -> Result<String> {
-	Reflect::get(obj, &k.into())?
-		.as_string()
-		.ok_or_else(|| RewriterError::not_str(k))
-}
-fn get_bool(obj: &JsValue, k: &'static str) -> Result<bool> {
-	Reflect::get(obj, &k.into())?
-		.as_bool()
-		.ok_or_else(|| RewriterError::not_bool(k))
+fn get_flag(obj: &Object, field: &str) -> Result<bool, JsValue> {
+    Reflect::get(obj, &JsValue::from_str(field))?
+        .as_bool()
+        .ok_or_else(|| JsValue::from_str(&format!("missing boolean flag: {field}")))
 }
 
-fn set_obj(obj: &Object, k: &str, v: &JsValue) -> Result<()> {
-	if Reflect::set(&obj.into(), &k.into(), v)? {
-		Ok(())
-	} else {
-		Err(RewriterError::ReflectSetFail(k.to_string()))
-	}
+fn set(obj: &Object, name: &str, value: &JsValue) -> Result<(), JsValue> {
+    if Reflect::set(obj, &JsValue::from_str(name), value)? { Ok(()) }
+    else { Err(JsValue::from_str("failed to create WASM output")) }
 }
 
-fn get_js_config(config: &Object) -> Result<Config> {
-	Ok(Config {
-		prefix: get_str(config, "prefix")?,
-
-		wrapfn: get_str(config, "wrapfn")?,
-		wrappropertybase: get_str(config, "wrappropertybase")?,
-		wrappropertyfn: get_str(config, "wrappropertyfn")?,
-		cleanrestfn: get_str(config, "cleanrestfn")?,
-		importfn: get_str(config, "importfn")?,
-		rewritefn: get_str(config, "rewritefn")?,
-		wrappostmessagefn: get_str(config, "wrappostmessagefn")?,
-		metafn: get_str(config, "metafn")?,
-		pushsourcemapfn: get_str(config, "pushsourcemapfn")?,
-
-		trysetfn: get_str(config, "trysetfn")?,
-		templocid: get_str(config, "templocid")?,
-		tempunusedid: get_str(config, "tempunusedid")?,
-	})
-}
-
-fn get_js_flags(obj: &Object, base: String, is_module: bool) -> Result<Flags> {
-	Ok(Flags {
-		base,
-		sourcetag: scramtag(),
-		is_module,
-
-		do_sourcemaps: get_bool(obj, "sourcemaps")?,
-		capture_errors: get_bool(obj, "captureErrors")?,
-		scramitize: get_bool(obj, "scramitize")?,
-		disable_computed_wrap: get_bool(obj, "disableComputedWrap")?,
-		destructure_rewrites: get_bool(obj, "destructureRewrites")?,
-
-	})
-}
-
-
-#[cfg(feature = "perftest")]
-// Perftest opt-in route: only scripts containing inert string statements,
-// comments and semicolons bypass OXC. All other scripts take the original path.
-// This is intentionally NOT a general-purpose JS rewrite implementation.
-fn try_inert_output(js: &str, flags: &Flags, config: &Config) -> Result<Option<JsRewriterOutput>> {
-    if flags.do_sourcemaps || flags.capture_errors || flags.scramitize {
-        return Ok(None);
+fn unsupported_flags(flags: &Object) -> Result<(), JsValue> {
+    for name in ["sourcemaps", "captureErrors", "scramitize", "destructureRewrites"] {
+        if get_flag(flags, name)? {
+            return Err(JsValue::from_str(&format!(
+                "{name} is not yet implemented in the no-parser rewrite engine"
+            )));
+        }
     }
-    let mut scanner = slopjet_perftest_scanner::stream::StreamingProgram::with_computed(
-        &config.wrapfn, &config.wrappropertybase, &config.wrappropertyfn,
-        flags.disable_computed_wrap
-    );
-    scanner.write(js);
-    let fast = scanner.finish();
-    if fast.is_none() && !slopjet_perftest_scanner::gate::identity_safe(js) {
-        return Ok(None);
-    }
-    let fast = fast.as_deref().unwrap_or(js);
+    Ok(())
+}
+
+fn create_output(source: &str) -> Result<JsRewriterOutput, JsValue> {
     let obj = Object::new();
-    set_obj(&obj, "js", &Uint8Array::from(fast.as_bytes()).into())?;
-    set_obj(&obj, "map", &Uint8Array::from(&[0u8, 0, 0, 0][..]).into())?;
-    set_obj(&obj, "scramtag", &scramtag().into())?;
-    set_obj(&obj, "errors", &Array::new().into())?;
-    Ok(Some(JsRewriterOutput::from(JsValue::from(obj))))
+    set(&obj, "js", &Uint8Array::from(source.as_bytes()).into())?;
+    set(&obj, "map", &Uint8Array::from(&[0u8, 0, 0, 0][..]).into())?;
+    set(&obj, "scramtag", &JsValue::from_str(&format!("slopjet-{}", Math::random())))?;
+    set(&obj, "errors", &Array::new().into())?;
+    Ok(JsRewriterOutput::from(JsValue::from(obj)))
+}
+
+fn rewrite(jsconfig: &Object, flags: &Object, source: &str) -> Result<JsRewriterOutput, JsValue> {
+    unsupported_flags(flags)?;
+    let mut engine = StreamingProgram::with_computed(
+        get_str(jsconfig, "wrapfn")?,
+        get_str(jsconfig, "wrappropertybase")?,
+        get_str(jsconfig, "wrappropertyfn")?,
+        get_flag(flags, "disableComputedWrap")?,
+    );
+    engine.write(source);
+    let rewritten = engine.finish().ok_or_else(|| {
+        JsValue::from_str(
+            "Unsupported JavaScript syntax in Slopjet's no-parser rewriter; no legacy fallback is enabled",
+        )
+    })?;
+    create_output(&rewritten)
 }
 
 #[wasm_bindgen]
-pub struct Rewriter {
-	alloc: Allocator,
-
-	js: JsRewriter,
-}
+pub struct Rewriter {}
 
 #[wasm_bindgen]
 impl Rewriter {
-	#[wasm_bindgen(constructor)]
-	pub fn new() -> Result<Self> {
-		Ok(Self {
-			alloc: Allocator::default(),
-
-			js: create_js()?
-		})
-	}
-
-	#[wasm_bindgen]
-	pub fn rewrite_js(
-		&mut self,
-		jsconfig: &Object,
-		jsflags: &Object,
-		encode_url: Object,
-		js: String,
-		base: String,
-		url: String,
-		module: bool,
-	) -> Result<JsRewriterOutput> {
-		let config = get_js_config(jsconfig)?;
-		let flags = get_js_flags(jsflags, base, module)?;
-		#[cfg(feature = "perftest")]
-		if let Some(output) = try_inert_output(&js, &flags, &config)? {
-			return Ok(output);
-		}
-		let rewriter = get_url_rewriter(encode_url)?;
-
-		let out = match self.js.rewrite(&self.alloc, &js, config, flags, &rewriter) {
-			Ok(x) => x,
-			Err(x) => {
-				self.alloc.reset();
-				Err(x)?
-			}
-		};
-
-		let ret = create_js_output(out, url, js);
-
-		self.alloc.reset();
-		ret
-	}
-
-	#[wasm_bindgen]
-	pub fn rewrite_js_bytes(
-		&mut self,
-		jsconfig: &Object,
-		jsflags: &Object,
-		encode_url: Object,
-		js: Vec<u8>,
-		base: String,
-		url: String,
-		module: bool,
-	) -> Result<JsRewriterOutput> {
-		// Network responses may contain malformed UTF-8; never assume validity.
-		let js = String::from_utf8(js)
-			.map_err(|error| JsValue::from_str(&format!("invalid UTF-8 JavaScript input: {error}")))?;
-
-		self.rewrite_js(jsconfig, jsflags, encode_url, js, base, url, module)
-	}
-
-}
-
-#[cfg(feature = "perftest")]
-#[wasm_bindgen]
-pub struct PerftestScanSession {
-    scanner: Option<slopjet_perftest_scanner::deferred::DeferredScanner>,
-}
-
-#[cfg(feature = "perftest")]
-#[wasm_bindgen]
-impl PerftestScanSession {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self { scanner: Some(slopjet_perftest_scanner::deferred::DeferredScanner::new()) }
+    pub fn new() -> Rewriter { Rewriter {} }
+
+    pub fn rewrite_js(
+        &mut self,
+        jsconfig: &Object,
+        jsflags: &Object,
+        _encode_url: Object,
+        js: String,
+        _base: String,
+        _url: String,
+        _module: bool,
+    ) -> Result<JsRewriterOutput, JsValue> {
+        rewrite(jsconfig, jsflags, &js)
     }
 
-    /// Incrementally scan a fragment and return buffered counters.
-    /// Source may be split across lexical tokens, but each fragment must be UTF-8.
-    pub fn write(&mut self, chunk: &str) -> std::result::Result<JsValue, JsValue> {
-        let scanner = self.scanner.as_mut()
-            .ok_or_else(|| JsValue::from_str("session already finalized"))?;
-        let status = scanner.write(chunk);
-        let object = Object::new();
-        Reflect::set(&object, &"pendingBytes".into(), &(status.pending_bytes as f64).into())?;
-        Reflect::set(&object, &"pendingTokens".into(), &(status.pending_tokens as f64).into())?;
-        Reflect::set(&object, &"emittedBytes".into(), &(status.emitted_bytes as f64).into())?;
-        Ok(object.into())
-    }
-
-    /// Finalize the experimental lexical scanner. This is NOT a semantic rewrite.
-    pub fn finish(&mut self) -> std::result::Result<String, JsValue> {
-        self.scanner.take()
-            .ok_or_else(|| JsValue::from_str("session already finalized"))?
-            .finish()
-            .map_err(|error| JsValue::from_str(&format!("{error:?}")))
+    pub fn rewrite_js_bytes(
+        &mut self,
+        jsconfig: &Object,
+        jsflags: &Object,
+        _encode_url: Object,
+        js: Vec<u8>,
+        _base: String,
+        _url: String,
+        _module: bool,
+    ) -> Result<JsRewriterOutput, JsValue> {
+        let source = String::from_utf8(js)
+            .map_err(|error| JsValue::from_str(&format!("invalid UTF-8: {error}")))?;
+        rewrite(jsconfig, jsflags, &source)
     }
 }
 
-
-// Experimental incremental rewriting API; a null result means use OXC.
-// No output is returned until EOF, avoiding speculative output.
-#[cfg(feature = "perftest")]
+/// One forward scanner with deferred output and request-private state.
+/// Unsupported syntax yields null. Network handlers must reject such requests.
 #[wasm_bindgen]
 pub struct PerftestRewriteSession {
-    scanner: Option<slopjet_perftest_scanner::stream::StreamingProgram>,
+    scanner: Option<StreamingProgram>,
 }
-#[cfg(feature = "perftest")]
+
 #[wasm_bindgen]
 impl PerftestRewriteSession {
     #[wasm_bindgen(constructor)]
-    pub fn new(wrapfn: String, propertybase: String, propertyfn: String, disable_computed_wrap: bool) -> Self {
-        Self { scanner: Some(slopjet_perftest_scanner::stream::StreamingProgram::with_computed(
-            wrapfn, propertybase, propertyfn, disable_computed_wrap
-        )) }
+    pub fn new(
+        wrapfn: String,
+        propertybase: String,
+        propertyfn: String,
+        disable_computed_wrap: bool,
+    ) -> PerftestRewriteSession {
+        PerftestRewriteSession {
+            scanner: Some(StreamingProgram::with_computed(
+                wrapfn, propertybase, propertyfn, disable_computed_wrap
+            )),
+        }
     }
-    pub fn write(&mut self, chunk: &str) -> std::result::Result<(), JsValue> {
+
+    pub fn write(&mut self, chunk: &str) -> Result<(), JsValue> {
         self.scanner.as_mut()
-            .ok_or_else(|| JsValue::from_str("rewrite session already finalized"))?
+            .ok_or_else(|| JsValue::from_str("scanner already finalized"))?
             .write(chunk);
         Ok(())
     }
-    /// Returns null when the original OXC rewriter must handle the source.
-    pub fn finish(&mut self) -> std::result::Result<Option<String>, JsValue> {
+
+    pub fn finish(&mut self) -> Result<Option<String>, JsValue> {
         Ok(self.scanner.take()
-            .ok_or_else(|| JsValue::from_str("rewrite session already finalized"))?
+            .ok_or_else(|| JsValue::from_str("scanner already finalized"))?
             .finish())
     }
 }
