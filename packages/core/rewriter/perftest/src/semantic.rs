@@ -398,6 +398,10 @@ impl SemanticProgram {
             }
         }
         if !stack.is_empty() || !curly_stack.is_empty() || !self.grammar_safe() { return None; }
+        // Mark computed lookups on privileged roots for runtime key checking.
+        // This lets normal patterns like globalThis[name] work without giving
+        // a dynamic key access to Function, constructor, or __proto__.
+        let mut guarded_brackets = vec![false; n];
         // Explicitly reject access to unvirtualized Function constructors
         // through a privileged realm reference. These can compile attacker-
         // supplied source with a separate realm's native compiler and bypass
@@ -428,9 +432,12 @@ impl SemanticProgram {
                             return None;
                         }
                     } else {
-                        // A computed name is not statically proven safe:
-                        // it may evaluate to Function/constructor at runtime.
-                        return None;
+                        // A computed key is unknown at scan time. The runtime
+                        // property wrapper now supports a privileged guard
+                        // which performs ToPropertyKey once and rejects
+                        // dangerous constructor/prototype keys.
+                        if close <= cursor+1 { return None; }
+                        guarded_brackets[cursor] = true;
                     }
                     cursor = close+1;
                     continue;
@@ -812,6 +819,11 @@ impl SemanticProgram {
             }
             patch(&mut patches, i).replace = Some(format!("{}({})", self.wrapfn, w));
         }
+        // If computed-key virtualization is disabled, a privileged dynamic
+        // lookup cannot be made safe by this semantic engine.
+        if self.disable_computed && guarded_brackets.iter().any(|guard| *guard) {
+            return None;
+        }
         if !self.disable_computed {
             for i in 0..n {
                 if !self.is(i, "[") { continue; }
@@ -832,7 +844,9 @@ impl SemanticProgram {
                     !unsafe_name(text.trim_matches(&['"', '\''][..]));
                 if numeric || plain_string { continue; }
                 patch(&mut patches, i+1).before.insert_str(0, &format!("{}((", self.propertyfn));
-                patch(&mut patches, end-1).after.push_str("))");
+                patch(&mut patches, end-1).after.push_str(
+                    if guarded_brackets[i] { "),true)" } else { "))" }
+                );
             }
         }
         // Most fetched bundles have no protected references; avoid a second
