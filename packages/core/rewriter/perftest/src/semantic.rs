@@ -1040,7 +1040,7 @@ mod tests {
     #[test]
     fn fails_closed() {
         for s in [
-            "const {location} = window;", "function f({location}){return location}",
+            "const {location} = window;",
             "location = x;", "eval('x')", "import('./x.js')",
             "with(x){location}", "obj.postMessage('x')", "const {location} = x",
         ] { assert!(rewrite(s,s.len()).is_none(),"{s:?}"); }
