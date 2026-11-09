@@ -1,8 +1,8 @@
 //! Independent-request parallelism, not intra-file chunk parallelism.
 //! Each task owns a complete source buffer and a fresh scanner. No shared parser state.
 //! Native builds use a bounded worker pool; wasm32 uses a synchronous fallback.
-//! This module currently validates lexing, not Scramjet rewrite equivalence.
-use crate::deferred::{DeferredError, DeferredScanner};
+//! Workers run the same no-parser semantic engine as the browser WASM path.
+use crate::semantic::SemanticProgram;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request { pub id: u64, pub source: String }
@@ -10,12 +10,13 @@ pub struct Request { pub id: u64, pub source: String }
 pub struct Response { pub id: u64, pub result: Result<String, String> }
 
 fn process(request: Request) -> Response {
-    let mut scanner = DeferredScanner::new();
+    let mut scanner = SemanticProgram::new(
+        "$wrap", "$property$", "$wrapProperty", false
+    );
     scanner.write(&request.source);
-    let result = scanner.finish().map_err(|err| match err {
-        DeferredError::Lexical(message) => message,
-        DeferredError::Unsupported(offsets) => format!("unsupported syntax at offsets {offsets:?}"),
-    });
+    let result = scanner.finish().ok_or_else(
+        || "unsupported JavaScript syntax in no-parser rewriter".to_string()
+    );
     Response { id: request.id, result }
 }
 
@@ -76,7 +77,7 @@ mod tests {
     fn independent_requests_keep_order_and_fail_individually() {
         let input = vec![
             Request { id: 8, source: "window.location;".into() },
-            Request { id: 2, source: "const r = /abc/;".into() },
+            Request { id: 2, source: "import(\u0027./x.js\u0027);".into() },
             Request { id: 4, source: "const x = 'ok';".into() },
         ];
         let expected = process_sequential(input.clone());
