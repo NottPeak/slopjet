@@ -776,6 +776,22 @@ mod tests {
         ));
     }
     #[test]
+    fn destructured_parameter_bindings_shadow_globals_without_ast() {
+        for source in [
+            "function f({location}) { return location; }",
+            "function f({location, top}) { return location + top; }",
+            "function f([parent]) { return parent; }",
+        ] {
+            assert_eq!(rewrite(source, source.len()), Some(source.into()), "{source}");
+        }
+        assert_eq!(
+            rewrite("top; function f({top}){return top;} top;", 100),
+            Some("$wrap(top); function f({top}){return top;} $wrap(top);".into())
+        );
+        assert!(rewrite("function f({location: top}){return top;}", 100).is_none());
+        assert!(rewrite("function f({a=top}){return top;}", 100).is_none());
+    }
+    #[test]
     fn nested_scope_forward_binding_resolution() {
         let src = "top; { top; const top = 123; top; } top;";
         assert_eq!(rewrite(src, src.len()),
