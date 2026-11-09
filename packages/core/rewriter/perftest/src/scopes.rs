@@ -66,7 +66,7 @@ impl ScopeIndex {
                     result.add_params(words, is_word, pairs, scope, open+1, i-1)?;
                 }
             } else if i > 1 && words[i-1] == ">" && words[i-2] == "=" {
-                if i < 4 { continue; }
+                if i < 3 { return None; }
                 if words[i-3] == ")" {
                     let open = pairs[i-3]?;
                     result.add_params(words, is_word, pairs, scope, open+1, i-3)?;
@@ -251,6 +251,13 @@ mod tests {
         let scopes = analyze(&words);
         assert!(scopes.shadowed(0, "top"));
         assert!(scopes.shadowed(9, "top"));
+    }
+    #[test]
+    fn single_parameter_arrow_binding() {
+        let words = ["top", "=", ">", "{", "top", ";", "}", "top"];
+        let scopes = analyze(&words);
+        assert!(scopes.shadowed(4, "top"));
+        assert!(!scopes.shadowed(7, "top"));
     }
     #[test]
     fn function_parameter_shadowing() {
