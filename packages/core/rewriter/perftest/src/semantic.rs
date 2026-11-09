@@ -411,7 +411,7 @@ impl SemanticProgram {
                 && matches!(self.tokens[i+2].kind, Kind::Word | Kind::Number | Kind::Literal)
                 && (i+3 == n || self.is(i+3, ";")) {
                 patch(&mut patches, i).replace = Some(format!(
-                    "((t)=>{}(location,\\\"=\\\",t)||(location=t))(",
+                    "((t)=>{}(location,\"=\",t)||(location=t))(",
                     self.trysetfn
                 ));
                 patch(&mut patches, i+1).replace = Some(String::new());
@@ -587,7 +587,7 @@ mod tests {
             .with_assignment("$tryset");
         engine.write("location = top;");
         assert_eq!(engine.finish(), Some(
-            "((t)=>$tryset(location,\\\"=\\\",t)||(location=t))(  $wrap(top));".into()
+            "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top));".into()
         ));
     }
     #[test]
