@@ -12,7 +12,7 @@ import {
 } from "../snapshot";
 
 // eslint-disable-next-line scramjet-core/no-globals
-Error.stackTraceLimit = 50;
+(Error as typeof Error & { stackTraceLimit?: number }).stackTraceLimit = 50;
 
 type RewriterResult = {
 	js: string | Uint8Array;
@@ -143,11 +143,12 @@ export function rewriteJs(
 
 		return newjs;
 	} catch (err) {
+		// Production errors must not dump third-party script source (tokens,
+		// credentials and page data) into service worker or browser logs.
 		dbg.warn(
 			"failed rewriting js for",
 			url || "(unknown)",
-			err.message,
-			typeof js !== "string" ? TextDecoder_decode(js) : js
+			err instanceof Error ? err.message : String(err)
 		);
 		// Never expose original, unrewritten JavaScript on a scanner error.
 		throw err;
