@@ -1016,7 +1016,8 @@ mod tests {
         assert_eq!(rewrite_with_helpers("eval(foo(1,2), bar);"),
             Some("eval($rewrite(foo(1,2)), bar);".into()));
         assert_eq!(rewrite_with_helpers("eval(...args)"), None);
-        assert_eq!(rewrite_with_helpers("(eval)('x')"), None);
+        assert_eq!(rewrite_with_helpers("(eval)('x')"),
+            Some("(eval)($rewrite('x'))".into()));
     }
     #[test]
     fn rejects_member_eval_module_meta_and_method_property_ambiguity() {
