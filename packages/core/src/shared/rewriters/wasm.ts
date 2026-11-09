@@ -70,7 +70,7 @@ export function getRewriter(
  */
 export type PerftestRewriteSessionLike = {
     write(chunk: string): void;
-    finish(): string | null;
+    finish(rewriteUrl?: (specifier: string) => string): string | null;
     free?(): void;
 };
 export function createPerftestRewriteSession(
