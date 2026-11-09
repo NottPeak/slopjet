@@ -1,31 +1,21 @@
 /**
- * Dedicated-worker implementation for Slopjet's perftest Rust/WASM fast path.
- * Must be hosted by a page or a dedicated/shared worker, NOT a service worker.
- *
- * Initialization message: {type:"init", glueUrl, wasmUrl}
- * Request message: {id, payload:{source:Uint8Array, options:{...}}}
- * Response message: {id, ok, result?:string|null, error?:string}
+ * Each browser Worker runs an independent instance of Slopjet's Rust/WASM scanner.
+ * Only request-level parallelism; no shared state or parser fallback.
  */
 let initialization = Promise.reject(new Error("worker not initialized"));
-initialization.catch(() => {}); // suppress rejection until a task awaits init
+initialization.catch(() => {});
 let Session = null;
-let FullRewriter = null;
-let rewriterInstance = null;
 
 async function initialize(glueUrl, wasmUrl) {
-  if (!glueUrl || !wasmUrl) throw new Error("glueUrl and wasmUrl are required");
+  if (!glueUrl || !wasmUrl) throw new Error("WASM glue and binary URLs required");
   const exports = await import(glueUrl);
-  if (typeof exports.PerftestRewriteSession !== "function" ||
-      typeof exports.Rewriter !== "function") {
-    throw new Error("WASM missing required perftest/Rewriter exports");
+  if (typeof exports.PerftestRewriteSession !== "function") {
+    throw new Error("This WASM build has no Rust scanner export");
   }
   const response = await fetch(wasmUrl);
   if (!response.ok) throw new Error("Unable to fetch WASM: " + response.status);
-  const bytes = await response.arrayBuffer();
-  exports.initSync({ module: new WebAssembly.Module(bytes) });
+  exports.initSync({ module: new WebAssembly.Module(await response.arrayBuffer()) });
   Session = exports.PerftestRewriteSession;
-  FullRewriter = exports.Rewriter;
-  rewriterInstance = new FullRewriter();
 }
 
 self.addEventListener("message", async (event) => {
@@ -39,38 +29,24 @@ self.addEventListener("message", async (event) => {
   if (!Number.isSafeInteger(id)) return;
   try {
     await initialization;
-    const { source, options, mode = "fast" } = data.payload ?? {};
+    const { source, options } = data.payload ?? {};
     if (!(source instanceof Uint8Array)) throw new TypeError("source must be Uint8Array");
     if (!options) throw new TypeError("missing rewrite options");
-    if (mode === "full") {
-      // Each dedicated Worker owns its own reusable OXC/WASM instance.
-      // The WASM wrapper resets its allocator after every rewrite.
-      const result = rewriterInstance.rewrite_js_bytes(
-        options.jsconfig,
-        options.flags,
-        (url) => encodeURIComponent(url),
-        source,
-        options.base,
-        options.url,
-        options.isModule
-      );
-      const bytes = result.js.slice();
-      self.postMessage({ id, ok: true, result: bytes }, [bytes.buffer]);
-      return;
-    }
-    if (mode !== "fast") throw new TypeError("Unknown rewrite mode");
     const scanner = new Session(
       options.wrapfn, options.propertybase, options.propertyfn,
       options.disableComputedWrap
     );
     try {
-      const decoder = new TextDecoder("utf-8");
-      // Chunked feed uses the same state machine as network streaming.
+      const decoder = new TextDecoder("utf-8", { fatal: true });
       for (let i = 0; i < source.byteLength; i += 16384) {
         scanner.write(decoder.decode(source.subarray(i, i + 16384), { stream: true }));
       }
       scanner.write(decoder.decode());
-      self.postMessage({ id, ok: true, result: scanner.finish() });
+      const result = scanner.finish();
+      if (typeof result !== "string") {
+        throw new SyntaxError("Unsupported syntax in Slopjet standalone scanner");
+      }
+      self.postMessage({ id, ok: true, result });
     } finally {
       scanner.free?.();
     }
