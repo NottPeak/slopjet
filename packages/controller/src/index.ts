@@ -204,7 +204,6 @@ const deepMerge = deepmerge();
 
 export type PerftestWorkerPool = {
     submit(payload: {
-        mode?: "fast";
         source: Uint8Array;
         options: {
             wrapfn: string;
@@ -212,18 +211,7 @@ export type PerftestWorkerPool = {
             propertyfn: string;
             disableComputedWrap: boolean;
         };
-    }): Promise<string | null>;
-    submit(payload: {
-        mode: "full";
-        source: Uint8Array;
-        options: {
-            jsconfig: ScramjetConfig["globals"] & { prefix: string };
-            flags: ScramjetConfig["flags"];
-            base: string;
-            url: string;
-            isModule: boolean;
-        };
-    }): Promise<Uint8Array>;
+    }): Promise<string>;
 };
 
 type ControllerInit = {
@@ -754,15 +742,6 @@ export class Frame {
                 rewriteJsFastAsync: this.controller.init.perftestWorkers
                     ? (source, options) => this.controller.init.perftestWorkers!.submit({
                         source, options
-                    })
-                    : undefined,
-                // Full OXC rewriting is safe in a Worker only when the URL
-                // codec is the standard encodeURIComponent implementation.
-                // Custom codecs remain on the controller's OXC path.
-                rewriteJsFullAsync: this.controller.init.perftestWorkers &&
-                    this.controller.config.codec.encode === config.codec.encode
-                    ? (source, options) => this.controller.init.perftestWorkers!.submit({
-                        mode: "full", source, options
                     })
                     : undefined,
 				getInjectScripts: yieldGetInjectScripts(
