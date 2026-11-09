@@ -103,7 +103,8 @@ impl SemanticProgram {
                 "delete" | "void" | "typeof" | "yield" | "await" |
                 "of" | "in" | "instanceof" | "else"),
             Kind::Punct => matches!(s, "=" | ":" | "," | ";" | "(" |
-                "[" | "{" | "!" | "?" | "&" | "|" | "~" | "+" | "-" | "*"),
+                "[" | "{" | "!" | "?" | "&" | "|" | "~" | "+" | "-" | "*" |
+                "<" | ">" | "%" | "^"),
             _ => false,
         }
     }
@@ -400,7 +401,17 @@ impl SemanticProgram {
                     } else { j += 1; }
                 }
             }
-            if is_export_from && specifier.is_none() { continue; }
+            if is_export_from && specifier.is_none() {
+                // A local export clause does not reference globals. Its
+                // specifier names must remain syntactically unchanged.
+                let close = if self.is(i+1, "{") { pairs[i+1]? } else {
+                    return None; // export * requires "from" and a source
+                };
+                if (i+2..close).any(|j| self.tokens[j].kind == Kind::Word &&
+                    unsafe_name(self.word(j))) { return None; }
+                for index in i..=close { module_clause[index] = true; }
+                continue;
+            }
             let specifier_index = specifier?;
             if (i+1..specifier_index).any(|j|
                 self.tokens[j].kind == Kind::Word && unsafe_name(self.word(j))
@@ -701,6 +712,13 @@ mod tests {
         assert_eq!(rewrite("\u{feff}top;", 200), Some("\u{feff}$wrap(top);".into()));
     }
     #[test]
+    fn recognizes_regex_after_arrow_and_binary_operators() {
+        assert_eq!(rewrite("const f = () => /location/.test('location');", 100),
+            Some("const f = () => /location/.test('location');".into()));
+        assert_eq!(rewrite("const x = 2 > /top/.test(text);", 100),
+            Some("const x = 2 > /top/.test(text);".into()));
+    }
+    #[test]
     fn division_after_call_and_regex_after_control() {
         assert_eq!(rewrite("const result = calc() / 2;", 100),
             Some("const result = calc() / 2;".into()));
@@ -865,6 +883,17 @@ mod tests {
             Some("array.with(0, $wrap(top));".into()));
         assert_eq!(rewrite("obj.import('./x');", 100),
             Some("obj.import('./x');".into()));
+    }
+    #[test]
+    fn local_exports_are_not_expression_references() {
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_module_meta("$meta", true);
+        engine.write("const x = top; export {x};");
+        assert_eq!(engine.finish(), Some("const x = $wrap(top); export {x};".into()));
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_module_meta("$meta", true);
+        engine.write("export {top};");
+        assert!(engine.finish().is_none());
     }
     #[test]
     fn static_module_specifiers_use_host_url_resolver() {
