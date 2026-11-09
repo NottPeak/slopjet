@@ -36,7 +36,7 @@ self.addEventListener("message", async (event) => {
       options.wrapfn, options.propertybase, options.propertyfn,
       options.disableComputedWrap,
       options.importfn, options.rewritefn, options.postmessagefn, options.base,
-      options.metafn, options.module
+      options.metafn, options.module, options.trysetfn
     );
     try {
       const decoder = new TextDecoder("utf-8", { fatal: true });
