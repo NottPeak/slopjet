@@ -118,7 +118,7 @@ impl Rewriter {
         &mut self,
         jsconfig: &Object,
         jsflags: &Object,
-        _encode_url: Object,
+        rewrite_url: Function,
         js: Vec<u8>,
         base: String,
         _url: String,
