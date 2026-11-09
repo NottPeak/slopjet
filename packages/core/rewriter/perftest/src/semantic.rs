@@ -1275,6 +1275,20 @@ mod tests {
         assert!(engine.finish().is_none());
     }
     #[test]
+    fn dynamically_guarded_privileged_keys() {
+        assert_eq!(rewrite("globalThis[name];", 128),
+            Some("globalThis[$computed((name),true)];".into()));
+        assert_eq!(rewrite("function emitBinding(name, payload) { var fn = globalThis[name]; }", 128),
+            Some("function emitBinding(name, payload) { var fn = globalThis[$computed((name),true)]; }".into()));
+        assert_eq!(rewrite("window[key];", 128),
+            Some("window[$computed((key),true)];".into()));
+        assert_eq!(rewrite("const x = obj[key];", 128),
+            Some("const x = obj[$computed((key))];".into()));
+        let mut scanner = SemanticProgram::new("$wrap", "$prop", "$computed", true);
+        scanner.write("globalThis[key];");
+        assert!(scanner.finish().is_none(), "disabled computed wrapping cannot bypass privileged guard");
+    }
+    #[test]
     fn blocks_privileged_function_constructor_escapes() {
         for source in [
             "new top.Function('return this')();",
