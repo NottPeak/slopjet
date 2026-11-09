@@ -113,6 +113,22 @@ test("static import and re-export URLs use the host resolver", () => {
   }
 });
 
+test("object and array destructuring declarations preserve semantics", () => {
+  const scripts = [
+    "const {a,b} = obj;",
+    "const {a:renamed, ...rest} = obj;",
+    "const {a='fallback'} = obj;",
+    "const [a,b=1,...rest] = values;",
+    "const {[key]: value} = obj;",
+  ];
+  for (const source of scripts) {
+    assert.equal(rewrite(source), source, source);
+    for (let size = 1; size < 7; size++) {
+      assert.equal(stream(source, size), source, source + " chunk=" + size);
+    }
+  }
+});
+
 test("unsupported syntax is rejected, not passed through", () => {
   const invalid = [
     "const {location} = window;",
