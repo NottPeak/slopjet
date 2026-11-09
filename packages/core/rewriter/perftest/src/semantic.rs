@@ -882,6 +882,21 @@ mod tests {
         assert_eq!(rewrite("{top}", 100), None);
     }
     #[test]
+    fn object_literal_keys_are_not_protected_member_references() {
+        let src = "const obj = {location: 1, top: 2, parent: 3, eval: 4, safe: 5};";
+        assert_eq!(rewrite(src, src.len()), Some(src.into()));
+        let src = "const obj = {location: top, parent: location};";
+        assert_eq!(
+            rewrite(src, src.len()),
+            Some("const obj = {location: $wrap(top), parent: $wrap(location)};".into())
+        );
+        let src = "const obj = {location: 1}; obj.location;";
+        assert_eq!(
+            rewrite(src, src.len()),
+            Some("const obj = {location: 1}; obj.$prop$location;".into())
+        );
+    }
+    #[test]
     fn contextual_keywords_can_be_methods_or_properties() {
         assert_eq!(rewrite("array.with(0, top);", 100),
             Some("array.with(0, $wrap(top));".into()));
