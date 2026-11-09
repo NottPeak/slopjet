@@ -315,6 +315,16 @@ impl SemanticProgram {
         }
         true
     }
+    fn object_shorthand(&self, at: usize, pairs: &[Option<usize>]) -> bool {
+        let Some(open) = (0..at).rev().find(|&i| {
+            self.is(i, "{") && pairs[i].is_some_and(|end| end > at)
+        }) else { return false };
+        if open == 0 { return false; }
+        // Distinguish expression objects from declarations, blocks,
+        // class bodies and function bodies without materializing an AST.
+        matches!(self.word(open-1),
+            "=" | ":" | "(" | "[" | "," | "return" | "=>" )
+    }
     pub fn finish(mut self) -> Option<String> {
         if !self.close() { return None; }
         let n = self.tokens.len();
@@ -497,7 +507,13 @@ impl SemanticProgram {
             if i>0 && (
                 self.is(i-1, "{") && self.tokens[i-1].kind != Kind::InterpolationOpen ||
                 self.is(i-1, ",")
-            ) && (self.is(i+1, "}") || self.is(i+1, ",")) { return None; }
+            ) && (self.is(i+1, "}") || self.is(i+1, ",")) {
+                if !self.object_shorthand(i, &pairs) { return None; }
+                patch(&mut patches, i).after.push_str(
+                    &format!(":{}({})", self.wrapfn, w)
+                );
+                continue;
+            }
             patch(&mut patches, i).replace = Some(format!("{}({})", self.wrapfn, w));
         }
         if !self.disable_computed {
@@ -696,6 +712,16 @@ mod tests {
         assert_eq!(rewrite("function f(){debugger;return 7;}", 200),
             Some("function f(){;return 7;}".into()));
         assert_eq!(rewrite("obj.debugger;", 200), Some("obj.debugger;".into()));
+    }
+    #[test]
+    fn rewrites_unsafe_object_shorthand_without_changing_key_name() {
+        assert_eq!(rewrite("const obj = {top};", 100),
+            Some("const obj = {top:$wrap(top)};".into()));
+        assert_eq!(rewrite("const obj = {key: 1, top, location};", 100),
+            Some("const obj = {key: 1, top:$wrap(top), location:$wrap(location)};".into()));
+        assert_eq!(rewrite("({parent})", 100),
+            Some("({parent:$wrap(parent)})".into()));
+        assert_eq!(rewrite("{top}", 100), None);
     }
     #[test]
     fn supports_simple_classes_without_parser() {
