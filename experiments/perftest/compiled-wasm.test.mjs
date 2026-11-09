@@ -43,7 +43,8 @@ function rewrite(source) {
 }
 function stream(source, n = 1) {
   const engine = new wasm.PerftestRewriteSession(
-    cfg.wrapfn, cfg.wrappropertybase, cfg.wrappropertyfn, false
+    cfg.wrapfn, cfg.wrappropertybase, cfg.wrappropertyfn, false,
+    cfg.importfn, cfg.rewritefn, cfg.wrappostmessagefn, "https://example.com/"
   );
   try {
     for (let i = 0; i < source.length; i += n) {
@@ -63,6 +64,9 @@ test("the compiled standalone WASM engine rewrites ordinary JS expressions", () 
     ["let x = obj[location];", "let x = obj[$wrapProperty(($wrap(location)))];"],
     ["const x = /location/gi; // location", "const x = /location/gi; // location"],
     ["let x = 10 / 2;", "let x = 10 / 2;"],
+    ["const m = import('./x.js');", "const m = $import(\"https://example.com/\",'./x.js');"],
+    ["eval('window.location');", "eval($rewrite('window.location'));"],
+    ["window.postMessage('x');", "$postMessage(window).postMessage('x');"],
   ];
   for (const [source, expected] of cases) {
     assert.equal(rewrite(source), expected, source);
@@ -77,9 +81,9 @@ test("unsupported syntax is rejected, not passed through", () => {
     "const location = 5;",
     "function f(location){return location}",
     "location = '/path';",
-    "import('./mod.js')",
-    "eval('location')",
-    "obj.postMessage('hello')",
+    "import x from 'lib';",
+    "eval(location, top)",
+    "obj.foo.postMessage('hello')",
   ];
   for (const source of invalid) {
     assert.notEqual(typeof stream(source), "string", source);
