@@ -16,6 +16,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - name: Ensure standalone WASM runtime has no parser dependency
+        run: |
+          if cargo tree -p wasm --edges normal | grep -Ei 'oxc|swc_ecma|babel'; then
+            echo "Unexpected AST/parser dependency in standalone runtime"
+            exit 1
+          fi
       - name: Validate experimental crate
         run: cargo test -p slopjet-perftest-scanner
       - name: Compile wasm rewriter with experimental feature
