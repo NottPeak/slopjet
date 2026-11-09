@@ -355,13 +355,18 @@ impl SemanticProgram {
         let words: Vec<&str> = (0..n).map(|i| self.word(i)).collect();
         let is_word: Vec<bool> = self.tokens.iter().map(|t| t.kind == Kind::Word).collect();
         let scopes = crate::scopes::ScopeIndex::new(&words, &is_word, &pairs)?;
-        // Object/array destructuring assignment syntax requires independent
-        // property-binding handling, not a normal member-key rewrite.
+        // Destructuring declarations are safe to preserve as source text if
+        // the pattern contains no protected bindings. ScopeIndex already
+        // rejects unsafe binding names in declaration patterns. Destructuring
+        // *assignments* need separate setter semantics and remain rejected.
         for i in 0..n {
             if self.is(i, "{") || self.is(i, "[") {
                 let end = pairs[i]?;
                 if self.is(end+1, "=") && !self.is(end+2, "=") {
-                    return None;
+                    let variable_binding = i > 0 && matches!(
+                        self.word(i-1), "let" | "const" | "var"
+                    );
+                    if !variable_binding { return None; }
                 }
             }
         }
@@ -847,6 +852,21 @@ mod tests {
             "class Test {constructor(value){this.value=value;}} const x=new Test($wrap(top));".into()));
         assert_eq!(rewrite("class X { location(){return top;} }", 100), None);
         assert_eq!(rewrite("class top { constructor(){} }", 100), None);
+    }
+    #[test]
+    fn preserves_destructuring_declarations_without_unsafe_binding_names() {
+        for source in [
+            "const {a,b} = obj;",
+            "const {a: renamed, ...rest} = obj;",
+            "const {a = 'default'} = obj;",
+            "let [a, b = 5, ...rest] = values;",
+            "const { nested: { value }} = obj;",
+            "const {[key]: value} = obj;",
+        ] {
+            assert_eq!(rewrite(source, source.len()), Some(source.into()), "{source:?}");
+        }
+        assert_eq!(rewrite("({a}=obj);", 100), None);
+        assert_eq!(rewrite("const {top} = obj;", 100), None);
     }
     #[test]
     fn object_grammar_and_spread_identifiers() {
