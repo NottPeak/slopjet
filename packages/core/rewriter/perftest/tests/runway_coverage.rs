@@ -40,3 +40,17 @@ fn runway_encoding_script_is_rewritable() {
     });"#;
     assert!(analyze(source).is_some(), "real encoding assertion script rejected");
 }
+
+
+#[test]
+fn isolate_emit_binding_construct() {
+    for (label, src) in [
+        ("empty", "function emitBinding(name, payload) {}"),
+        ("var", "function emitBinding(name, payload) { var fn = globalThis[name]; }"),
+        ("if", "function emitBinding(name, payload) { var fn = globalThis[name]; if (typeof fn === 'function') {} }"),
+        ("call", "function emitBinding(name, payload) { var fn = globalThis[name]; if (typeof fn === 'function') { fn(JSON.stringify(payload)); } }"),
+        ("exact", "function emitBinding(name, payload) {\n\tvar fn = globalThis[name];\n\tif (typeof fn === 'function') {\n\t\tfn(JSON.stringify(payload));\n\t}\n}"),
+    ] {
+        assert!(analyze(src).is_some(), "variant: {label}");
+    }
+}
