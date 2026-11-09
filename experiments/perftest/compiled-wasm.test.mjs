@@ -44,7 +44,8 @@ function rewrite(source) {
 function stream(source, n = 1) {
   const engine = new wasm.PerftestRewriteSession(
     cfg.wrapfn, cfg.wrappropertybase, cfg.wrappropertyfn, false,
-    cfg.importfn, cfg.rewritefn, cfg.wrappostmessagefn, "https://example.com/"
+    cfg.importfn, cfg.rewritefn, cfg.wrappostmessagefn, "https://example.com/",
+    cfg.metafn, false
   );
   try {
     for (let i = 0; i < source.length; i += n) {
