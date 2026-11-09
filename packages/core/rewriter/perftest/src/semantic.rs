@@ -359,10 +359,8 @@ impl SemanticProgram {
         }
         true
     }
-    fn object_shorthand(&self, at: usize, pairs: &[Option<usize>]) -> bool {
-        let Some(open) = (0..at).rev().find(|&i| {
-            self.is(i, "{") && pairs[i].is_some_and(|end| end > at)
-        }) else { return false };
+    fn object_shorthand(&self, _at: usize, open: Option<usize>) -> bool {
+        let Some(open) = open else { return false };
         if open == 0 { return false; }
         // Distinguish expression objects from declarations, blocks,
         // class bodies and function bodies without materializing an AST.
@@ -380,7 +378,11 @@ impl SemanticProgram {
         let n = self.tokens.len();
         let mut pairs = vec![None; n];
         let mut stack = Vec::new();
+        let mut curly_stack = Vec::new();
+        let mut enclosing_brace = vec![None; n];
         for i in 0..n {
+            if self.is(i, "{") { curly_stack.push(i); }
+            enclosing_brace[i] = curly_stack.last().copied();
             if matches!(self.word(i), "(" | "[" | "{") {
                 if stack.len() >= self.limits.nesting { return None; }
                 stack.push(i);
@@ -390,9 +392,12 @@ impl SemanticProgram {
                     ("(",")") | ("[","]") | ("{","}")) { return None; }
                 pairs[j] = Some(i);
                 pairs[i] = Some(j);
+                if self.is(i, "}") {
+                    curly_stack.pop();
+                }
             }
         }
-        if !stack.is_empty() || !self.grammar_safe() { return None; }
+        if !stack.is_empty() || !curly_stack.is_empty() || !self.grammar_safe() { return None; }
         // Explicitly reject access to unvirtualized Function constructors
         // through a privileged realm reference. These can compile attacker-
         // supplied source with a separate realm's native compiler and bypass
@@ -646,9 +651,7 @@ impl SemanticProgram {
                 self.is(i-1, "get") || self.is(i-1, "set") ||
                 self.is(i-1, "async")
             ) && self.is(i+1, "(") {
-                let open = (0..i).rev().find(|&j|
-                    self.is(j, "{") && pairs[j].is_some_and(|end| end>i)
-                )?;
+                let open = enclosing_brace[i]?;
                 let object = open>0 && matches!(self.word(open-1),
                     "=" | ":" | "(" | "[" | "," | "return");
                 let class = open>=2 && self.is(open-2, "class");
@@ -780,7 +783,7 @@ impl SemanticProgram {
                 self.is(i-1, "{") && self.tokens[i-1].kind != Kind::InterpolationOpen ||
                 self.is(i-1, ",")
             ) && (self.is(i+1, "}") || self.is(i+1, ",")) {
-                if !self.object_shorthand(i, &pairs) { return None; }
+                if !self.object_shorthand(i, enclosing_brace[i]) { return None; }
                 patch(&mut patches, i).after.push_str(
                     &format!(":{}({})", self.wrapfn, w)
                 );
