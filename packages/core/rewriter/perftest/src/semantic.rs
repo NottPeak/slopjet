@@ -235,7 +235,10 @@ impl SemanticProgram {
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
-            if matches!(w, "import" | "export" | "with" | "class") { return false; }
+            if matches!(w, "export" | "with" | "class") { return false; }
+            if w == "import" && !(self.is(i+1, "(") || (i>0 && self.is(i-1, "."))) {
+                return false;
+            }
             if matches!(w, "var" | "let" | "const") {
                 // Detect all binding names, including later comma-separated
                 // declarators. Nested initializer expressions are skipped.
@@ -302,9 +305,67 @@ impl SemanticProgram {
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
-            if w == "debugger" || w == "postMessage" && i>0 && self.is(i-1, ".") {
-                return None;
+            if w == "debugger" { return None; }
+
+            if w == "import" && self.is(i+1, "(") {
+                if self.importfn.is_empty() || self.base.is_empty() { return None; }
+                let end = pairs[i+1]?;
+                if end <= i+2 { return None; }
+                // The helper currently accepts one specifier argument.
+                // Reject import attributes/options until implemented.
+                let mut j = i+2;
+                while j < end {
+                    if self.is(j, ",") { return None; }
+                    if self.is(j, "(") || self.is(j, "[") || self.is(j, "{") {
+                        j = pairs[j]? + 1;
+                    } else { j += 1; }
+                }
+                patch(&mut patches, i).replace = Some(self.importfn.clone());
+                patch(&mut patches, i+1).after.push_str(&js_string(&self.base));
+                patch(&mut patches, i+1).after.push(',');
+                continue;
             }
+
+            if w == "postMessage" && i>0 && self.is(i-1, ".") {
+                if self.postmessagefn.is_empty() || i<2 ||
+                    self.tokens[i-2].kind != Kind::Word ||
+                    i>2 && self.is(i-3, ".") ||
+                    self.is(i-2, "super") {
+                    return None;
+                }
+                let before = format!("{}(", self.postmessagefn);
+                patch(&mut patches, i-2).before.insert_str(0, &before);
+                patch(&mut patches, i-2).after.push(')');
+                continue;
+            }
+
+            if w == "eval" && self.is(i+1, "(") {
+                if self.rewritefn.is_empty() { return None; }
+                let end = pairs[i+1]?;
+                if end > i+2 {
+                    let mut j = i+2;
+                    while j < end {
+                        if self.is(j, ",") { return None; }
+                        if self.is(j, "(") || self.is(j, "[") || self.is(j, "{") {
+                            j = pairs[j]? + 1;
+                        } else { j += 1; }
+                    }
+                    patch(&mut patches, i+2).before.insert_str(
+                        0, &format!("{}(", self.rewritefn)
+                    );
+                    patch(&mut patches, end-1).after.push(')');
+                }
+                continue; // preserve direct-eval callee semantics
+            }
+
+            if w == "new" && i+2 < n &&
+                self.tokens[i+1].kind == Kind::Word &&
+                unsafe_name(self.word(i+1)) && self.is(i+2, "(") {
+                patch(&mut patches, i+1).before.push('(');
+                patch(&mut patches, i+1).after.push(')');
+                continue;
+            }
+
             if !unsafe_name(w) { continue; }
             if i>0 && self.is(i-1, ".") {
                 patch(&mut patches, i).replace = Some(format!("{}{}", self.propertybase, w));
@@ -334,7 +395,7 @@ impl SemanticProgram {
                     (self.is(i+3, "=") || op == "+" || op == "-")
                 ) { return None; }
             }
-            if w == "eval" && self.is(i+1, "(") { return None; }
+            if w == "eval" && self.is(i+1, "?") { return None; }
             if self.is(i+1, ":") { return None; }
             if i>0 && (
                 self.is(i-1, "{") && self.tokens[i-1].kind != Kind::InterpolationOpen ||
@@ -443,6 +504,26 @@ mod tests {
             assert_eq!(rewrite(nested, n), Some(nested_expected.into()), "nested {n}");
         }
     }
+
+    fn rewrite_with_helpers(source: &str) -> Option<String> {
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$computed", false)
+            .with_helpers("$import", "$rewrite", "$post", "https://a.test/mod.js");
+        engine.write(source);
+        engine.finish()
+    }
+    #[test]
+    fn module_eval_and_message_helpers() {
+        assert_eq!(rewrite_with_helpers("const m = import('./x.js');"),
+            Some("const m = $import(\"https://a.test/mod.js\",'./x.js');".into()));
+        assert_eq!(rewrite_with_helpers("eval('window.location');"),
+            Some("eval($rewrite('window.location'));".into()));
+        assert_eq!(rewrite_with_helpers("window.postMessage('x');"),
+            Some("$post(window).postMessage('x');".into()));
+        assert_eq!(rewrite_with_helpers("top.postMessage('x');"),
+            Some("$post($wrap(top)).postMessage('x');".into()));
+        assert!(rewrite_with_helpers("import('./x',{with:{type:'json'}})").is_none());
+    }
+
     #[test]
     fn fails_closed() {
         for s in [
