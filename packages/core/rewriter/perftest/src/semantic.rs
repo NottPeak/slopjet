@@ -868,6 +868,25 @@ mod tests {
         assert_eq!(engine.finish(), Some(
             "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top));".into()
         ));
+        for (source, expected) in [
+            ("location = top + '/next';",
+             "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top) + '/next');"),
+            ("location = Math.max(top, 1);",
+             "((t)=>$tryset(location,\"=\",t)||(location=t))(  Math.max($wrap(top), 1));"),
+            ("location = (top + parent);",
+             "((t)=>$tryset(location,\"=\",t)||(location=t))(  ($wrap(top) + $wrap(parent)));"),
+        ] {
+            let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+                .with_assignment("$tryset");
+            engine.write(source);
+            assert_eq!(engine.finish(), Some(expected.into()), "{source}");
+        }
+        for invalid in ["location = a, b;", "location = foo\\nbar;"] {
+            let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+                .with_assignment("$tryset");
+            engine.write(invalid);
+            assert!(engine.finish().is_none(), "{invalid}");
+        }
     }
     #[test]
     fn supports_exported_declarations_without_ast() {
