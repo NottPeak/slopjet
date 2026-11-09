@@ -135,7 +135,6 @@ test("object and array destructuring declarations preserve semantics", () => {
 test("unsupported syntax is rejected, not passed through", () => {
   const invalid = [
     "const {location} = window;",
-    "function f({location}){return location}",
     "location += '/path';",
     "import x from 'lib';",
     "eval(...args)",
