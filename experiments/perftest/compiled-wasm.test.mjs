@@ -135,7 +135,7 @@ test("object and array destructuring declarations preserve semantics", () => {
 test("unsupported syntax is rejected, not passed through", () => {
   const invalid = [
     "const {location} = window;",
-    "location += '/path';",
+    "new top.Function('return this')();",
     "import x from 'lib';",
     "eval(...args)",
     "new Foo().postMessage('hello')",
