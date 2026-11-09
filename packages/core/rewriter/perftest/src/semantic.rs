@@ -401,21 +401,36 @@ impl SemanticProgram {
             if !matches!(self.word(i), "top" | "parent" | "window" | "self" | "globalThis") {
                 continue;
             }
-            if self.is(i+1, ".") && matches!(
-                self.tokens.get(i+2).map(|_| self.word(i+2)),
-                Some("Function" | "constructor")
-            ) {
-                return None;
-            }
-            if self.is(i+1, "[") {
-                let end = pairs[i+1]?;
-                if i+3 == end && self.tokens[i+2].kind == Kind::Literal {
-                    let name = self.word(i+2).trim_matches(&['"', '\''][..]);
-                    if matches!(name, "Function" | "constructor" | "__proto__")
-                        || name.contains('\\') {
+            // Follow the whole static member chain; checking only one
+            // property leaves globalThis.__proto__.constructor exposed.
+            let mut cursor = i+1;
+            loop {
+                if self.is(cursor, ".") {
+                    let next = cursor+1;
+                    if next >= n { break; }
+                    if matches!(self.word(next), "Function" | "constructor" | "__proto__") {
                         return None;
                     }
+                    cursor = next+1;
+                    continue;
                 }
+                if self.is(cursor, "[") {
+                    let close = pairs[cursor]?;
+                    if cursor+2 == close && self.tokens[cursor+1].kind == Kind::Literal {
+                        let name = self.word(cursor+1).trim_matches(&['"', '\''][..]);
+                        if matches!(name, "Function" | "constructor" | "__proto__")
+                            || name.contains('\\') {
+                            return None;
+                        }
+                    } else {
+                        // A computed name is not statically proven safe:
+                        // it may evaluate to Function/constructor at runtime.
+                        return None;
+                    }
+                    cursor = close+1;
+                    continue;
+                }
+                break;
             }
         }
         let words: Vec<&str> = (0..n).map(|i| self.word(i)).collect();
