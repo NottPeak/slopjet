@@ -26,12 +26,31 @@ fn not_object(s: &str) -> bool {
         "const" | "let" | "var" | "export" | "import" | "extends")
 }
 
+
+fn js_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len()+2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
 pub struct SemanticProgram {
     source: String, tokens: Vec<Token>, cursor: usize, start: usize,
     mode: Mode, escaped: bool, in_class: bool, prev_star: bool,
     unsupported: bool, templates: Vec<TemplateFrame>,
     wrapfn: String, propertybase: String,
     propertyfn: String, disable_computed: bool,
+    importfn: String, rewritefn: String, postmessagefn: String, base: String,
 }
 impl SemanticProgram {
     pub fn new(wrapfn: impl Into<String>, propertybase: impl Into<String>,
@@ -40,8 +59,21 @@ impl SemanticProgram {
             mode: Mode::Code, escaped: false, in_class: false, prev_star: false,
             unsupported: false, templates: Vec::new(),
             wrapfn: wrapfn.into(), propertybase: propertybase.into(),
-            propertyfn: propertyfn.into(), disable_computed }
+            propertyfn: propertyfn.into(), disable_computed,
+            importfn: String::new(), rewritefn: String::new(),
+            postmessagefn: String::new(), base: String::new() }
     }
+    pub fn with_helpers(
+        mut self, importfn: impl Into<String>, rewritefn: impl Into<String>,
+        postmessagefn: impl Into<String>, base: impl Into<String>,
+    ) -> Self {
+        self.importfn = importfn.into();
+        self.rewritefn = rewritefn.into();
+        self.postmessagefn = postmessagefn.into();
+        self.base = base.into();
+        self
+    }
+
     fn emit(&mut self, kind: Kind) {
         self.tokens.push(Token { start: self.start, end: self.cursor, kind });
         self.mode = Mode::Code;
