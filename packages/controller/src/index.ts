@@ -231,7 +231,7 @@ type ControllerInit = {
 };
 
 type FrameOptions = {
-	plugins: ManagedPlugin[];
+	plugins?: ManagedPlugin[];
 };
 
 export class Controller {
@@ -748,7 +748,8 @@ export class Frame {
 			interface: {
                 rewriteJsFastAsync: this.controller.init.perftestWorkers
                     ? (source, options) => this.controller.init.perftestWorkers!.submit({
-                        source, options
+                        source,
+                        options: options as Parameters<PerftestWorkerPool["submit"]>[0]["options"]
                     })
                     : undefined,
 				getInjectScripts: yieldGetInjectScripts(
