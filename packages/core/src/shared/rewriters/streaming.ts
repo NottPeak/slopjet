@@ -29,6 +29,10 @@ export async function rewriteJsResponse(
         propertybase: context.config.globals.wrappropertybase,
         propertyfn: context.config.globals.wrappropertyfn,
         disableComputedWrap: flagEnabled("disableComputedWrap", context, meta.base),
+        importfn: context.config.globals.importfn,
+        rewritefn: context.config.globals.rewritefn,
+        postmessagefn: context.config.globals.wrappostmessagefn,
+        base: meta.base.href,
     };
     const parallel = context.interface.rewriteJsFastAsync;
     if (parallel) {
@@ -43,7 +47,8 @@ export async function rewriteJsResponse(
 
     const session = createPerftestRewriteSession(
         options.wrapfn, options.propertybase,
-        options.propertyfn, options.disableComputedWrap
+        options.propertyfn, options.disableComputedWrap,
+        options.importfn, options.rewritefn, options.postmessagefn, options.base
     );
     if (!session) {
         throw new Error("Slopjet scanner WASM not available; refusing unrewritten JS");
