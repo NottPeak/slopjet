@@ -578,7 +578,11 @@ impl SemanticProgram {
                 continue;
             }
             if self.is(i+1, ":") && i>0 && (self.is(i-1, "{") || self.is(i-1, ",")) {
-                patch(&mut patches, i).replace = Some(format!("{}{}", self.propertybase, w));
+                // Object literal keys, destructuring keys and statement labels
+                // are source-defined property names, not member accesses.
+                // Rewriting them changes Object.keys() and normal property
+                // semantics. Only a member expression gets the protected
+                // property-name substitution.
                 continue;
             }
             // Bindings discovered later in the same scope shadow this name.
