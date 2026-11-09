@@ -341,9 +341,9 @@ jobs:
           cache-all-crates: true
           shared-key: "rewriter"
 
-      - name: Run Tests
-        run: cargo test
-        working-directory: packages/core/rewriter/native
+      - name: Test standalone Rust semantic scanner
+        run: cargo test -p slopjet-perftest-scanner
+        working-directory: packages/core/rewriter
 
   upload:
     name: Upload release
