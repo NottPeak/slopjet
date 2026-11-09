@@ -35,7 +35,8 @@ self.addEventListener("message", async (event) => {
     const scanner = new Session(
       options.wrapfn, options.propertybase, options.propertyfn,
       options.disableComputedWrap,
-      options.importfn, options.rewritefn, options.postmessagefn, options.base
+      options.importfn, options.rewritefn, options.postmessagefn, options.base,
+      options.metafn, options.module
     );
     try {
       const decoder = new TextDecoder("utf-8", { fatal: true });
