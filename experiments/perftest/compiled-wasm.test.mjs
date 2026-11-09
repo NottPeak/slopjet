@@ -176,7 +176,7 @@ test("compiled WASM preserves object keys and protected parameter shadowing", ()
     ["foo.postMessage = fn;",
       "$postMessage(foo).postMessage = fn;"],
     ["location = top + '/next';",
-      "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top) + '/next');"],
+      "((t)=>{const v=t;return $tryset(location,\"=\",v)?v:(location=v)})(  $wrap(top) + '/next');"],
   ];
   for (const [source, expected] of cases) {
     assert.equal(rewrite(source), expected, source);
