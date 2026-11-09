@@ -378,6 +378,19 @@ mod tests {
         }
     }
     #[test]
+    fn template_interpolations_and_network_chunk_boundaries() {
+        let source = "const t = `host ${window.location.hostname}: ${top}`;";
+        let expected = "const t = `host ${window.$prop$location.hostname}: ${$wrap(top)}`;";
+        for n in 1..=source.len() {
+            assert_eq!(rewrite(source, n), Some(expected.into()), "chunk {n}");
+        }
+        let nested = "const t = `a ${`b ${top}`}`;";
+        let nested_expected = "const t = `a ${`b ${$wrap(top)}`}`;";
+        for n in 1..=nested.len() {
+            assert_eq!(rewrite(nested, n), Some(nested_expected.into()), "nested {n}");
+        }
+    }
+    #[test]
     fn fails_closed() {
         for s in [
             "const location = 1;", "function f(location){return location}",
