@@ -218,7 +218,7 @@ export type PerftestWorkerPool = {
             module: boolean;
             trysetfn: string;
         };
-    }): Promise<string>;
+    }, transfer?: Transferable[]): Promise<string>;
 };
 
 type ControllerInit = {
@@ -750,7 +750,7 @@ export class Frame {
                     ? (source, options) => this.controller.init.perftestWorkers!.submit({
                         source,
                         options: options as Parameters<PerftestWorkerPool["submit"]>[0]["options"]
-                    })
+                    }, source.buffer instanceof ArrayBuffer ? [source.buffer] : [])
                     : undefined,
 				getInjectScripts: yieldGetInjectScripts(
 					this.controller.config,
