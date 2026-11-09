@@ -1,5 +1,5 @@
 import { flagEnabled, ScramjetContext } from "@/shared";
-import { URLMeta } from "@rewriters/url";
+import { URLMeta, rewriteUrl } from "@rewriters/url";
 
 import { getRewriter, JsRewriterOutput } from "@rewriters/wasm";
 import {
@@ -45,7 +45,7 @@ function rewriteJsWasm(
 					prefix: context.prefix.pathname,
 				},
 				flagsobj,
-				context.interface.codecEncode,
+				(specifier: string) => rewriteUrl(specifier, context, meta, { isModule: true }),
 				input,
 				meta.base.href,
 				source || "(unknown)",
@@ -58,7 +58,7 @@ function rewriteJsWasm(
 					prefix: context.prefix.pathname,
 				},
 				flagsobj,
-				context.interface.codecEncode,
+				(specifier: string) => rewriteUrl(specifier, context, meta, { isModule: true }),
 				input,
 				meta.base.href,
 				source || "(unknown)",
