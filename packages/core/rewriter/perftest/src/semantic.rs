@@ -2,7 +2,7 @@
 //! A forward lexer retains state across network chunks. Nothing is released
 //! until binding ambiguity and supported syntax checks have completed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind { Word, Number, Literal, Punct }
+enum Kind { Word, Number, Literal, Punct, InterpolationOpen }
 #[derive(Clone, Copy, Debug)]
 struct Token { start: usize, end: usize, kind: Kind }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,7 +128,7 @@ impl SemanticProgram {
                         self.cursor += 1;
                         self.start = self.cursor;
                         self.cursor += 1;
-                        self.emit(Kind::Punct);
+                        self.emit(Kind::InterpolationOpen);
                         if let Some(frame) = self.templates.last_mut() {
                             frame.in_expression = true;
                             frame.depth = 0;
@@ -301,8 +301,10 @@ impl SemanticProgram {
             }
             if w == "eval" && self.is(i+1, "(") { return None; }
             if self.is(i+1, ":") { return None; }
-            if i>0 && (self.is(i-1, "{") || self.is(i-1, ",")) &&
-                (self.is(i+1, "}") || self.is(i+1, ",")) { return None; }
+            if i>0 && (
+                self.is(i-1, "{") && self.tokens[i-1].kind != Kind::InterpolationOpen ||
+                self.is(i-1, ",")
+            ) && (self.is(i+1, "}") || self.is(i+1, ",")) { return None; }
             patches[i].replace = Some(format!("{}({})", self.wrapfn, w));
         }
         if !self.disable_computed {
