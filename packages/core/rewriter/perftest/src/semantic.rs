@@ -598,6 +598,9 @@ impl SemanticProgram {
                 patch(&mut patches, end-1).after.push_str("))");
             }
         }
+        // Most fetched bundles have no protected references; avoid a second
+        // source copy when the token validation produced zero edits.
+        if patches.iter().all(Option::is_none) { return Some(self.source); }
         let mut out = String::with_capacity(self.source.len()+64);
         let mut at = 0;
         for (i,t) in self.tokens.iter().enumerate() {
