@@ -97,3 +97,57 @@ test("known constructor escape paths never emit unprotected JS", () => {
     assert.throws(() => transform(source), /Unsupported JavaScript syntax/, source);
   }
 });
+
+
+test("protected location assignments return the JS assignment value", () => {
+  for (const [source, initial, expected] of [
+    ["location = 0;", "https://site.test/", 0],
+    ["location += '/next';", "https://site.test/", "https://site.test//next"],
+  ]) {
+    const location = {
+      href: initial,
+      [Symbol.toPrimitive]() { return this.href; },
+    };
+    let writes = 0;
+    const context = {
+      location,
+      $tryset(lhs, op, rhs) {
+        assert.equal(lhs, location);
+        assert.equal(op, "=");
+        writes++;
+        location.href = String(rhs);
+        return true;
+      },
+    };
+    const transformed = transform(source);
+    const result = new vm.Script(transformed).runInNewContext(context);
+    assert.equal(result, expected);
+    assert.equal(location.href, String(expected));
+    assert.equal(writes, 1);
+  }
+});
+
+test("compound assignment evaluates RHS only once", () => {
+  const location = {
+    href: "https://site.test/",
+    [Symbol.toPrimitive]() { return this.href; },
+  };
+  let evaluated = 0;
+  let writes = 0;
+  const context = {
+    location,
+    rhs() { evaluated++; return "next"; },
+    $tryset(lhs, op, value) {
+      assert.equal(lhs, location);
+      assert.equal(op, "=");
+      writes++;
+      location.href = value;
+      return true;
+    },
+  };
+  const output = transform("location += rhs();");
+  const value = new vm.Script(output).runInNewContext(context);
+  assert.equal(value, "https://site.test/next");
+  assert.equal(evaluated, 1);
+  assert.equal(writes, 1);
+});
