@@ -24,6 +24,7 @@ pub struct ScopeIndex {
     scopes: Vec<Scope>,
     at: Vec<usize>,
     declarations: Vec<bool>,
+    parameter_masks: Vec<u8>,
 }
 impl ScopeIndex {
     pub fn new(words: &[&str], is_word: &[bool], pairs: &[Option<usize>]) -> Option<Self> {
@@ -33,6 +34,7 @@ impl ScopeIndex {
             scopes: vec![Scope::default()],
             at: vec![0; n],
             declarations: vec![false; n],
+            parameter_masks: vec![0; n],
         };
         let mut stack = vec![0usize];
         // Build a lightweight hierarchy of curly-brace regions.
@@ -198,12 +200,19 @@ impl ScopeIndex {
                 i = pairs[i]? + 1;
             } else { i += 1; }
         }
+        // Parameter default expressions use the same parameter environment.
+        // Even a later parameter shadows an earlier default (TDZ).
+        let mask = self.scopes[scope].bindings;
+        for index in start..end {
+            self.parameter_masks[index] |= mask;
+        }
         Some(())
     }
 
     pub fn shadowed(&self, token_index: usize, name: &str) -> bool {
         let flag = bit(name);
         if flag == 0 { return false; }
+        if (self.parameter_masks[token_index] & flag) != 0 { return true; }
         let mut scope = self.at[token_index];
         loop {
             if (self.scopes[scope].bindings & flag) != 0 { return true; }
@@ -258,6 +267,17 @@ mod tests {
         let scopes = analyze(&words);
         assert!(scopes.shadowed(4, "top"));
         assert!(!scopes.shadowed(7, "top"));
+    }
+    #[test]
+    fn later_parameter_shadowing_applies_to_default_expressions() {
+        let words = [
+            "function", "f", "(", "x", "=", "top", ",", "top", "=", "1",
+            ")", "{", "top", ";", "}"
+        ];
+        let scopes = analyze(&words);
+        assert!(scopes.shadowed(5, "top"));
+        assert!(scopes.shadowed(12, "top"));
+        assert!(scopes.declaration(7));
     }
     #[test]
     fn function_parameter_shadowing() {
