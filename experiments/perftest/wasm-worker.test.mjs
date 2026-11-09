@@ -31,6 +31,8 @@ test("worker initializes the standalone scanner and rewrites independent request
         source: new TextEncoder().encode("location;"),
         options: {
           wrapfn: "$wrap", propertybase: "$property$",
+        metafn: "$meta", module: false,
+          metafn: "$meta", module: false,
           propertyfn: "$wrapProp", disableComputedWrap: false,
         },
       },
