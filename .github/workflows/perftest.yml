@@ -52,11 +52,9 @@ jobs:
         with:
           name: standalone-wasm-bindings
           path: packages/core/rewriter/wasm/out
-      - name: Typecheck core declarations (report diagnostics)
-        continue-on-error: true
+      - name: Typecheck core declarations
         run: pnpm --dir packages/core exec tsc -p tsconfig.types.json --pretty false
-      - name: Typecheck controller declarations (report diagnostics)
-        continue-on-error: true
+      - name: Typecheck controller declarations
         run: pnpm --dir packages/controller exec tsc -p tsconfig.types.json --pretty false
 
   compiled-wasm:
