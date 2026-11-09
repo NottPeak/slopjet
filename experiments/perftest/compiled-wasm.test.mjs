@@ -32,7 +32,7 @@ function rewrite(source, module = false) {
   const engine = new wasm.Rewriter();
   try {
     const output = engine.rewrite_js(
-      cfg, flags, () => { throw new Error("URL codec must not be invoked"); },
+      cfg, flags, (specifier) => "/proxy/" + specifier,
       source, "https://example.com/", "test.js", module
     );
     assert.ok(output.js instanceof Uint8Array);
@@ -51,7 +51,7 @@ function stream(source, n = 1, module = false) {
     for (let i = 0; i < source.length; i += n) {
       engine.write(source.slice(i, i + n));
     }
-    return engine.finish();
+    return engine.finish((specifier) => "/proxy/" + specifier);
   } finally {
     engine.free();
   }
@@ -101,6 +101,15 @@ test("compiled WASM resolves shadowed globals in block and function scope", () =
     for (let n = 1; n < Math.min(source.length, 10); n++) {
       assert.equal(stream(source, n), expected);
     }
+  }
+});
+
+test("static import and re-export URLs use the host resolver", () => {
+  const source = "import x from './mod.js'; export {x} from '../other.mjs';";
+  const expected = 'import x from "/proxy/./mod.js"; export {x} from "/proxy/../other.mjs";';
+  assert.equal(rewrite(source, true), expected);
+  for (let size = 1; size < 12; size++) {
+    assert.equal(stream(source, size, true), expected);
   }
 });
 
