@@ -47,3 +47,24 @@ jobs:
       - name: Typecheck controller declarations (report diagnostics)
         continue-on-error: true
         run: pnpm --dir packages/controller exec tsc -p tsconfig.types.json --pretty false
+
+  compiled-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-rewriter-toolchain
+        with:
+          wasm-bindgen-version: '0.2.105'
+          rewriter-path: packages/core/rewriter
+          github-token: ${{ github.token }}
+      - name: Build standalone WASM scanner
+        working-directory: packages/core/rewriter/wasm
+        run: bash build.sh
+      - name: Run browser-facing WASM contract tests
+        run: node --test experiments/perftest/compiled-wasm.test.mjs
