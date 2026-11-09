@@ -83,14 +83,31 @@ impl ScopeIndex {
                 }
             }
         }
-        // Named function declarations bind in their containing scope too.
+        // Function declarations bind in their enclosing scope. Named
+        // function EXPRESSIONS bind only inside their own function scope.
+        // An expression name must not shadow globals outside that body.
         for i in 0..n {
-            if words[i] == "function" {
-                let mut j = i+1;
-                if j < n && words[j] == "*" { j += 1; }
-                if j < n && is_word[j] && words.get(j+1) == Some(&"(") {
-                    result.bind(result.at[i], words[j], j);
-                }
+            if words[i] != "function" { continue; }
+            let mut j = i+1;
+            if j < n && words[j] == "*" { j += 1; }
+            if j >= n || !is_word[j] || words.get(j+1) != Some(&"(") {
+                continue;
+            }
+            let prev = if i > 0 && words[i-1] == "async" {
+                words.get(i.wrapping_sub(2)).copied()
+            } else {
+                i.checked_sub(1).and_then(|index| words.get(index).copied())
+            };
+            let expression = matches!(prev,
+                Some("=" | "(" | "[" | "," | ":" | "return" | "=>" | "yield"));
+            if expression {
+                let params_close = pairs[j+1]?;
+                let open_brace = params_close+1;
+                if words.get(open_brace) != Some(&"{") { return None; }
+                let scope = brace_scope[open_brace]?;
+                result.bind(scope, words[j], j);
+            } else {
+                result.bind(result.at[i], words[j], j);
             }
         }
         // The lexical scope of a for(let/const ...) binding includes its
@@ -297,6 +314,15 @@ mod tests {
         let scopes = analyze(&words);
         assert!(scopes.shadowed(4, "top"));
         assert!(!scopes.shadowed(7, "top"));
+    }
+    #[test]
+    fn named_function_expression_name_does_not_escape_its_scope() {
+        let words = ["const", "f", "=", "function", "top", "(", ")",
+            "{", "top", ";", "}", ";", "top", ";"];
+        let scopes = analyze(&words);
+        assert!(scopes.shadowed(8, "top"));
+        assert!(!scopes.shadowed(12, "top"));
+        assert!(scopes.declaration(4));
     }
     #[test]
     fn later_parameter_shadowing_applies_to_default_expressions() {
