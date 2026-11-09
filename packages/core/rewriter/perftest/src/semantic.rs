@@ -557,12 +557,22 @@ impl SemanticProgram {
             }
 
             if !unsafe_name(w) { continue; }
-            // Object literal methods are property keys, not bare references.
+            // Method declarations use property-key spelling, not global
+            // identifier-reference semantics. Only skip keys inside a clearly
+            // recognized object or simple class body; a bare location()
+            // statement inside a function block is NOT a method.
             if i>0 && (
                 self.is(i-1, "{") || self.is(i-1, ",") ||
                 self.is(i-1, "get") || self.is(i-1, "set") ||
                 self.is(i-1, "async")
             ) && self.is(i+1, "(") {
+                let open = (0..i).rev().find(|&j|
+                    self.is(j, "{") && pairs[j].is_some_and(|end| end>i)
+                )?;
+                let object = open>0 && matches!(self.word(open-1),
+                    "=" | ":" | "(" | "[" | "," | "return");
+                let class = open>=2 && self.is(open-2, "class");
+                if object || class { continue; }
                 return None;
             }
             if i>0 && self.is(i-1, ".") {
