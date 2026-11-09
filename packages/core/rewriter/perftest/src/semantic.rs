@@ -710,6 +710,13 @@ mod tests {
             Some("const x = {foo:$wrap(top)}, parent = 7; parent;".into()));
     }
     #[test]
+    fn function_expression_binding_is_not_a_global() {
+        let src = "const f = function top(){return top;}; top;";
+        assert_eq!(rewrite(src, src.len()), Some(
+            "const f = function top(){return top;}; $wrap(top);".into()
+        ));
+    }
+    #[test]
     fn nested_scope_forward_binding_resolution() {
         let src = "top; { top; const top = 123; top; } top;";
         assert_eq!(rewrite(src, src.len()),
