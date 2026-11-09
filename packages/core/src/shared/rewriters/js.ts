@@ -126,9 +126,10 @@ export function rewriteJs(
 				const sourcemapfn = `${context.config.globals.pushsourcemapfn}([${res.map.join(",")}], "${res.tag}");`;
 
 				// don't put the sourcemap call before "use strict"
+				const sourceText = typeof newjs === "string" ? newjs : TextDecoder_decode(newjs);
 				const strictMode = new _RegExp(/^\s*(['"])use strict\1;?/);
-				if (strictMode.test(newjs)) {
-					newjs = newjs.replace(strictMode, `$&\n${sourcemapfn}`);
+				if (strictMode.test(sourceText)) {
+					newjs = sourceText.replace(strictMode, `$&\n${sourcemapfn}`);
 				} else {
 					newjs = `${sourcemapfn}\n${newjs}`;
 				}
