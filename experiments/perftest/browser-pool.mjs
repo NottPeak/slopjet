@@ -16,16 +16,19 @@ export class RequestPool {
   #nextId = 1;
   #closed = false;
   #maxQueue;
+  #timeoutMs;
 
-  constructor({ workerFactory, workers = 2, maxQueue = 1024 }) {
+  constructor({ workerFactory, workers = 2, maxQueue = 1024, timeoutMs = 60000 }) {
     if (typeof workerFactory !== "function") throw new TypeError("workerFactory required");
     if (!Number.isSafeInteger(workers) || workers < 1) throw new RangeError("workers must be >= 1");
     if (!Number.isSafeInteger(maxQueue) || maxQueue < 0) throw new RangeError("maxQueue must be >= 0");
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) throw new RangeError("timeoutMs must be a non-negative integer");
+    this.#timeoutMs = timeoutMs;
     this.#workerFactory = workerFactory;
     this.#maxQueue = maxQueue;
     try {
       for (let index = 0; index < workers; index++) {
-        const slot = { worker: null, busy: false, id: null, index };
+        const slot = { worker: null, busy: false, id: null, index, timer: null };
         this.#start(slot);
         this.#workers.push(slot);
       }
@@ -76,6 +79,15 @@ export class RequestPool {
       slot.busy = true;
       slot.id = task.id;
       try {
+        // A stalled worker is replaced so subsequent independent requests
+        // can make progress. The timeout starts only after dispatch.
+        if (this.#timeoutMs) {
+          slot.timer = setTimeout(() => {
+            if (!this.#closed && slot.id === task.id) {
+              this.#fail(slot, new Error("worker request timed out"));
+            }
+          }, this.#timeoutMs);
+        }
         slot.worker.postMessage({ id: task.id, payload: task.payload }, task.transfer);
       } catch (error) {
         this.#fail(slot, error);
@@ -84,6 +96,8 @@ export class RequestPool {
   }
 
   #fail(slot, error) {
+    clearTimeout(slot.timer);
+    slot.timer = null;
     if (slot.id !== null) {
       const task = this.#pending.get(slot.id);
       this.#pending.delete(slot.id);
@@ -106,6 +120,8 @@ export class RequestPool {
       this.#fail(slot, new Error("worker response ID mismatch"));
       return;
     }
+    clearTimeout(slot.timer);
+    slot.timer = null;
     const task = this.#pending.get(slot.id);
     this.#pending.delete(slot.id);
     slot.busy = false;
@@ -121,7 +137,11 @@ export class RequestPool {
     for (const task of this.#pending.values()) task.reject(new Error("pool closed"));
     this.#pending.clear();
     this.#queue.length = 0;
-    for (const slot of this.#workers) slot.worker?.terminate();
+    for (const slot of this.#workers) {
+      clearTimeout(slot.timer);
+      slot.timer = null;
+      slot.worker?.terminate();
+    }
     this.#workers.length = 0;
   }
 }
