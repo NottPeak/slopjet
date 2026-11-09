@@ -24,6 +24,18 @@ export async function rewriteJsResponse(
         }
     }
 
+    // Decoding follows the origin response's declared script charset.
+    // Rewritten output is always emitted as UTF-8.
+    const contentType = response.headers.get("content-type") || "";
+    const charset = /(?:^|;)\\s*charset\\s*=\\s*(?:"([^"]+)"|'([^']+)'|([^;\\s]+))/i.exec(contentType);
+    const label = charset?.[1] || charset?.[2] || charset?.[3] || "utf-8";
+    let decoder: TextDecoder;
+    try {
+        decoder = new TextDecoder(label);
+    } catch {
+        decoder = new TextDecoder("utf-8");
+    }
+
     const options = {
         wrapfn: context.config.globals.wrapfn,
         propertybase: context.config.globals.wrappropertybase,
@@ -65,7 +77,7 @@ export async function rewriteJsResponse(
     }
 
     try {
-        const decoder = new TextDecoder("utf-8", { fatal: true });
+        // Decoder is initialized above using the response charset.
         if (workerBytes) {
             session.write(decoder.decode(workerBytes));
         } else if (response.body) {
