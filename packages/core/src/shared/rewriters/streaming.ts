@@ -124,17 +124,24 @@ export async function rewriteJsResponse(
         try {
             // Keep original intact in case the worker rejects or cannot
             // recognize this source; its bytes are needed for OXC fallback.
-            fast = await parallel(original.slice(), options);
+            const value = await parallel(original.slice(), options);
+            fast = typeof value === "string" ? value : null;
         } catch {
             fast = null;
         }
     } else if (!fastScanFailed) {
-        try { fast = session!.finish(); }
-        catch { fast = null; }
+        try {
+            const value = session!.finish();
+            // wasm-bindgen Option<String>::None can be JS undefined;
+            // never encode an absent rewrite result as empty JavaScript.
+            fast = typeof value === "string" ? value : null;
+        } catch {
+            fast = null;
+        }
     }
     // wasm-bindgen objects retain WASM heap allocations until explicitly freed.
     session?.free?.();
-    if (fast !== null) {
+    if (typeof fast === "string") {
         return new TextEncoder().encode(fast);
     }
     return rewriteJs(original, source, context, meta, isModule);
