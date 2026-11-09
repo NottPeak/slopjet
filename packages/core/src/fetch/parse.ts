@@ -23,6 +23,7 @@ export const QP = {
 	fakeDataURL: "$fakedataurl",
 } as const;
 
+export type ScramjetRequestMode = RequestMode;
 export type QueryParamKey = keyof typeof QP;
 
 export type QueryParams = Partial<Record<QueryParamKey, string>>;
