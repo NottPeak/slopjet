@@ -304,12 +304,12 @@ impl SemanticProgram {
             if w == "export" {
                 if !self.is_module || !matches!(
                     self.tokens.get(i+1).map(|_| self.word(i+1)),
-                    Some("const" | "let" | "var" | "function" | "default" | "async")
+                    Some("const" | "let" | "var" | "function" | "default" | "async" | "{" | "*")
                 ) { return false; }
             }
             if w == "import" && !(self.is(i+1, "(") ||
-                self.is_module && !self.metafn.is_empty() &&
-                self.is(i+1, ".") && self.is(i+2, "meta")) {
+                self.is_module && (self.is(i+1, ".") && self.is(i+2, "meta")
+                    && !self.metafn.is_empty() || !self.is(i+1, "."))) {
                 return false;
             }
         }
@@ -325,7 +325,13 @@ impl SemanticProgram {
         matches!(self.word(open-1),
             "=" | ":" | "(" | "[" | "," | "return" | "=>" )
     }
-    pub fn finish(mut self) -> Option<String> {
+    pub fn finish(self) -> Option<String> {
+        self.finish_with_url_rewriter(|_| None)
+    }
+
+    /// URL rewriting is provided by the host, preserving the proxy URL codec.
+    pub fn finish_with_url_rewriter<F>(mut self, mut rewrite_url: F) -> Option<String>
+    where F: FnMut(&str) -> Option<String> {
         if !self.close() { return None; }
         let n = self.tokens.len();
         let mut pairs = vec![None; n];
@@ -356,8 +362,56 @@ impl SemanticProgram {
             }
         }
         let mut patches: Vec<Option<Patch>> = (0..n).map(|_| None).collect();
+        let mut module_clause = vec![false; n];
+        // Handle static module declarations in the existing token stream.
         for i in 0..n {
-            if self.tokens[i].kind != Kind::Word { continue; }
+            let word = self.word(i);
+            let is_import = word == "import" &&
+                !self.is(i+1, "(") && !self.is(i+1, ".");
+            let is_export_from = word == "export" &&
+                (self.is(i+1, "{") || self.is(i+1, "*"));
+            if !is_import && !is_export_from { continue; }
+            if !self.is_module { return None; }
+            let mut specifier = None;
+            if is_import && self.tokens.get(i+1).is_some_and(|t| t.kind == Kind::Literal) {
+                specifier = Some(i+1);
+            } else {
+                let mut j = i+1;
+                while j < n && !self.is(j, ";") {
+                    if self.is(j, "from") {
+                        if j+1 >= n || self.tokens[j+1].kind != Kind::Literal {
+                            return None;
+                        }
+                        specifier = Some(j+1);
+                        break;
+                    }
+                    if matches!(self.word(j), "(" | "[" | "{") {
+                        j = pairs[j]?+1;
+                    } else { j += 1; }
+                }
+            }
+            if is_export_from && specifier.is_none() { continue; }
+            let specifier_index = specifier?;
+            if (i+1..specifier_index).any(|j|
+                self.tokens[j].kind == Kind::Word && unsafe_name(self.word(j))
+            ) { return None; }
+            for index in i..specifier_index { module_clause[index] = true; }
+            let value = self.word(specifier_index);
+            let bytes = value.as_bytes();
+            if bytes.len() < 2 || !matches!(bytes[0], b'\'' | b'"') ||
+                bytes[bytes.len()-1] != bytes[0] { return None; }
+            let spec = &value[1..value.len()-1];
+            if spec.contains('\\') { return None; }
+            if spec.starts_with('.') || spec.starts_with('/') || spec.contains(':') {
+                let rewritten = rewrite_url(spec)?;
+                patch(&mut patches, specifier_index).replace = Some(js_string(&rewritten));
+            }
+            if self.is(specifier_index+1, "with") || self.is(specifier_index+1, "assert") {
+                return None;
+            }
+        }
+        for i in 0..n {
+            if self.tokens[i].kind != Kind::Word || module_clause[i] { continue; }
             let w = self.word(i);
             if w == "debugger" {
                 // Remove the debugger statement without perturbing its
@@ -722,6 +776,26 @@ mod tests {
         assert_eq!(rewrite("({parent})", 100),
             Some("({parent:$wrap(parent)})".into()));
         assert_eq!(rewrite("{top}", 100), None);
+    }
+    #[test]
+    fn static_module_specifiers_use_host_url_resolver() {
+        let script = "import x from './mod.js'; export {x} from '../a.mjs';";
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_module_meta("$meta", true);
+        engine.write(script);
+        let result = engine.finish_with_url_rewriter(
+            |specifier| Some(format!("/proxy/{specifier}"))
+        );
+        assert_eq!(result, Some(
+            "import x from \"/proxy/./mod.js\"; export {x} from \"/proxy/../a.mjs\";".into()
+        ));
+    }
+    #[test]
+    fn rejects_unresolved_relative_module_urls() {
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_module_meta("$meta", true);
+        engine.write("import './mod.js';");
+        assert!(engine.finish().is_none());
     }
     #[test]
     fn supports_simple_classes_without_parser() {
