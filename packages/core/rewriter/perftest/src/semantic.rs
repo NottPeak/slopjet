@@ -595,24 +595,37 @@ impl SemanticProgram {
                 continue;
             }
 
-            // A parenthesized eval callee is a direct eval under ECMAScript
-            // semantics, but has different token boundaries. Reject rather
-            // than accidentally make it indirect by wrapping the identifier.
-            if w == "eval" && i>0 && self.is(i-1, "(") &&
-                self.is(i+1, ")") && self.is(i+2, "(") {
-                return None;
+            // Parenthesized eval is still a direct eval if the grouping
+            // consists only of balanced parentheses around the identifier.
+            // A comma expression such as (0,eval) is indirect and is not
+            // recognized by this rule.
+            let mut direct_eval_call = None;
+            if w == "eval" && (i==0 || (!self.is(i-1, ".") && !self.is(i-1, "new"))) {
+                if self.is(i+1, "(") {
+                    direct_eval_call = Some(i+1);
+                } else {
+                    let mut left = i;
+                    let mut right = i+1;
+                    while left>0 && self.is(left-1, "(") &&
+                        self.is(right, ")") && pairs[left-1] == Some(right) {
+                        left -= 1;
+                        right += 1;
+                    }
+                    if left < i && self.is(right, "(") &&
+                        (left==0 || !self.is(left-1, "new")) {
+                        direct_eval_call = Some(right);
+                    }
+                }
             }
-            if w == "eval" && self.is(i+1, "(") &&
-                (i==0 || (!self.is(i-1, ".") && !self.is(i-1, "new"))) {
+            if let Some(open) = direct_eval_call {
                 if scopes.shadowed(i, "eval") { continue; }
                 if self.rewritefn.is_empty() { return None; }
-                let end = pairs[i+1]?;
-                if end > i+2 {
-                    // Direct eval only uses its first argument as code.
-                    // Preserve evaluation of subsequent arguments and their
-                    // side effects, while wrapping exactly the first value.
-                    if self.is(i+2, ".") { return None; } // spread argument
-                    let mut j = i+2;
+                let end = pairs[open]?;
+                if end > open+1 {
+                    // Preserve the direct callee's reference and only rewrite
+                    // its first argument; subsequent args retain side effects.
+                    if self.is(open+1, ".") { return None; } // spread
+                    let mut j = open+1;
                     let mut first_end = end;
                     while j < end {
                         if self.is(j, ",") {
@@ -623,14 +636,14 @@ impl SemanticProgram {
                             j = pairs[j]? + 1;
                         } else { j += 1; }
                     }
-                    if first_end > i+2 {
-                        patch(&mut patches, i+2).before.insert_str(
+                    if first_end > open+1 {
+                        patch(&mut patches, open+1).before.insert_str(
                             0, &format!("{}(", self.rewritefn)
                         );
                         patch(&mut patches, first_end-1).after.push(')');
                     }
                 }
-                continue; // preserve the direct eval callee
+                continue;
             }
 
             if w == "new" && i+2 < n &&
@@ -1271,6 +1284,24 @@ mod tests {
         ] {
             assert!(rewrite(source, source.len()).is_some(), "{source:?}");
         }
+    }
+    #[test]
+    fn parenthesized_direct_eval_preserves_call_semantics() {
+        let mut cases = [
+            ("eval('top');", "eval($rewrite('top'));"),
+            ("(eval)('top');", "(eval)($rewrite('top'));"),
+            ("((eval))('top');", "((eval))($rewrite('top'));"),
+        ];
+        for (src, expected) in &mut cases {
+            let mut engine = SemanticProgram::new("$wrap", "$prop", "$computed", false)
+                .with_helpers("$import", "$rewrite", "$post", "https://a.test/");
+            engine.write(src);
+            assert_eq!(engine.finish(), Some(expected.to_string()), "{src}");
+        }
+        let mut engine = SemanticProgram::new("$wrap", "$prop", "$computed", false)
+            .with_helpers("$import", "$rewrite", "$post", "https://a.test/");
+        engine.write("(0,eval)('top')");
+        assert_eq!(engine.finish(), Some("(0,$wrap(eval))('top')".into()));
     }
     #[test]
     fn fails_closed() {
