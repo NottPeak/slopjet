@@ -1057,6 +1057,23 @@ mod tests {
             Some("(eval)($rewrite('x'))".into()));
     }
     #[test]
+    fn single_spread_direct_eval_preserves_callee_and_one_iteration() {
+        assert_eq!(rewrite_with_helpers("eval(...args);"),
+            Some("eval(...$rewrite(args,true));".into()));
+        assert_eq!(rewrite_with_helpers("eval(...['1+1']);"),
+            Some("eval(...$rewrite(['1+1'],true));".into()));
+        assert_eq!(rewrite_with_helpers("eval(...(values()))"),
+            Some("eval(...$rewrite((values()),true))".into()));
+        for source in [
+            "eval(...args, another);",
+            "eval(...[1], 2);",
+            "eval(...args,...other)",
+            "eval(. . .args)",
+        ] {
+            assert!(rewrite_with_helpers(source).is_none(), "{source:?}");
+        }
+    }
+    #[test]
     fn rejects_member_eval_module_meta_and_method_property_ambiguity() {
         assert!(rewrite("const x = import.meta.url;", 40).is_none());
         assert_eq!(rewrite("const obj = {location(){return 1}};", 50),
