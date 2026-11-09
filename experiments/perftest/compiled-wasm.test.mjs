@@ -159,3 +159,26 @@ test("unsupported flags fail explicitly", () => {
     engine.free();
   }
 });
+
+test("compiled WASM preserves object keys and protected parameter shadowing", () => {
+  const cases = [
+    ["const obj = {location: 1, top: 2, parent: 3, eval: 4};",
+      "const obj = {location: 1, top: 2, parent: 3, eval: 4};"],
+    ["const obj = {location: top, parent: location};",
+      "const obj = {location: $wrap(top), parent: $wrap(location)};"],
+    ["function f({location, top}){return location + top;}",
+      "function f({location, top}){return location + top;}"],
+    ["top; function f({top}){return top;} top;",
+      "$wrap(top); function f({top}){return top;} $wrap(top);"],
+    ["foo.postMessage = fn;",
+      "$postMessage(foo).postMessage = fn;"],
+    ["location = top + '/next';",
+      "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top) + '/next');"],
+  ];
+  for (const [source, expected] of cases) {
+    assert.equal(rewrite(source), expected, source);
+    for (let size = 1; size <= Math.min(16, source.length); size++) {
+      assert.equal(stream(source, size), expected, source + ": chunk " + size);
+    }
+  }
+});
