@@ -154,11 +154,27 @@ impl SemanticProgram {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
             if matches!(w, "import" | "export" | "with" | "class") { return false; }
-            if matches!(w, "var" | "let" | "const" | "class") {
-                if i+1 < n && unsafe_name(self.word(i+1)) { return false; }
-                if self.is(i+1, "{") || self.is(i+1, "[") {
-                    let Some(end) = pairs[i+1] else { return false };
-                    if (i+2..end).any(|j| unsafe_name(self.word(j))) { return false; }
+            if matches!(w, "var" | "let" | "const") {
+                // Detect all binding names, including later comma-separated
+                // declarators. Nested initializer expressions are skipped.
+                let mut j = i+1;
+                let mut expecting_binding = true;
+                while j < n && !self.is(j, ";") && !self.is(j, ")") {
+                    if self.is(j, "{") || self.is(j, "[") || self.is(j, "(") {
+                        let Some(end) = pairs[j] else { return false };
+                        if expecting_binding && (j+1..end)
+                            .any(|k| unsafe_name(self.word(k))) { return false; }
+                        j = end+1;
+                        expecting_binding = false;
+                        continue;
+                    }
+                    if self.is(j, ",") {
+                        expecting_binding = true;
+                    } else if expecting_binding && self.tokens[j].kind == Kind::Word {
+                        if unsafe_name(self.word(j)) { return false; }
+                        expecting_binding = false;
+                    }
+                    j += 1;
                 }
             }
             if matches!(w, "function" | "catch") {
@@ -314,6 +330,16 @@ mod tests {
             for step in 1..=source.len() {
                 assert_eq!(rewrite(source,step),baseline,"{source:?}/{step}");
             }
+        }
+    }
+    #[test]
+    fn rejects_multi_declarator_shadowing() {
+        for src in [
+            "var a = 1, location;",
+            "let x = top, parent = 5;",
+            "const x = {foo:top}, eval = 7;",
+        ] {
+            assert!(rewrite(src, src.len()).is_none(), "{src:?}");
         }
     }
     #[test]
