@@ -3,7 +3,7 @@
 //! The rewrite path is implemented by the independent lexical engine crate.
 //! No OXC parser, allocator, or fallback is linked into this WASM module.
 //! Unrecognized syntax is rejected rather than emitted without protection.
-use js_sys::{Array, Math, Object, Reflect, Uint8Array};
+use js_sys::{Array, Function, Math, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
 use slopjet_perftest_scanner::semantic::SemanticProgram;
@@ -61,7 +61,7 @@ fn create_output(source: &str) -> Result<JsRewriterOutput, JsValue> {
     Ok(JsRewriterOutput::from(JsValue::from(obj)))
 }
 
-fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str, module: bool) -> Result<JsRewriterOutput, JsValue> {
+fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str, module: bool, url_rewriter: &Function) -> Result<JsRewriterOutput, JsValue> {
     unsupported_flags(flags)?;
     let mut engine = SemanticProgram::new(
         get_str(jsconfig, "wrapfn")?,
@@ -76,11 +76,20 @@ fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str, module: 
     ).with_module_meta(get_str(jsconfig, "metafn")?, module)
      .with_assignment(get_str(jsconfig, "trysetfn")?);
     engine.write(source);
-    let rewritten = engine.finish().ok_or_else(|| {
-        JsValue::from_str(
-            "Unsupported JavaScript syntax in Slopjet's no-parser rewriter; no legacy fallback is enabled",
-        )
-    })?;
+    let mut url_error = None;
+    let rewritten = engine.finish_with_url_rewriter(|specifier| {
+        match url_rewriter.call1(&JsValue::NULL, &JsValue::from_str(specifier)) {
+            Ok(value) => value.as_string(),
+            Err(error) => {
+                url_error = Some(error);
+                None
+            }
+        }
+    });
+    if let Some(error) = url_error { return Err(error); }
+    let rewritten = rewritten.ok_or_else(|| JsValue::from_str(
+        "Unsupported JavaScript syntax in standalone Slopjet rewriter",
+    ))?;
     create_output(&rewritten)
 }
 
@@ -96,13 +105,13 @@ impl Rewriter {
         &mut self,
         jsconfig: &Object,
         jsflags: &Object,
-        _encode_url: Object,
+        rewrite_url: Function,
         js: String,
         base: String,
         _url: String,
         module: bool,
     ) -> Result<JsRewriterOutput, JsValue> {
-        rewrite(jsconfig, jsflags, &js, &base, module)
+        rewrite(jsconfig, jsflags, &js, &base, module, &rewrite_url)
     }
 
     pub fn rewrite_js_bytes(
@@ -117,7 +126,7 @@ impl Rewriter {
     ) -> Result<JsRewriterOutput, JsValue> {
         let source = String::from_utf8(js)
             .map_err(|error| JsValue::from_str(&format!("invalid UTF-8: {error}")))?;
-        rewrite(jsconfig, jsflags, &source, &base, module)
+        rewrite(jsconfig, jsflags, &source, &base, module, &rewrite_url)
     }
 }
 
@@ -160,9 +169,18 @@ impl PerftestRewriteSession {
         Ok(())
     }
 
-    pub fn finish(&mut self) -> Result<Option<String>, JsValue> {
-        Ok(self.scanner.take()
-            .ok_or_else(|| JsValue::from_str("scanner already finalized"))?
-            .finish())
+    pub fn finish(&mut self, rewrite_url: Option<Function>) -> Result<Option<String>, JsValue> {
+        let scanner = self.scanner.take()
+            .ok_or_else(|| JsValue::from_str("scanner already finalized"))?;
+        let Some(callback) = rewrite_url else { return Ok(scanner.finish()); };
+        let mut url_error = None;
+        let rewritten = scanner.finish_with_url_rewriter(|specifier| {
+            match callback.call1(&JsValue::NULL, &JsValue::from_str(specifier)) {
+                Ok(value) => value.as_string(),
+                Err(error) => { url_error = Some(error); None }
+            }
+        });
+        if let Some(error) = url_error { return Err(error); }
+        Ok(rewritten)
     }
 }
