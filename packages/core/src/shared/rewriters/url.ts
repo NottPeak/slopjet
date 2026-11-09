@@ -109,7 +109,7 @@ function dataToBlob(url: string) {
 		bytes = TextEncoder_encode(decoded);
 	}
 
-	const blob = new Blob([bytes], { type });
+	const blob = new Blob([new Uint8Array(bytes).buffer], { type });
 	const objectUrl = URL_createObjectURL(blob);
 	return { blob, objectUrl };
 }
