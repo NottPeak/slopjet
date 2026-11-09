@@ -27,7 +27,7 @@ export async function rewriteJsResponse(
     // Decoding follows the origin response's declared script charset.
     // Rewritten output is always emitted as UTF-8.
     const contentType = response.headers.get("content-type") || "";
-    const charset = /(?:^|;)\\s*charset\\s*=\\s*(?:"([^"]+)"|'([^']+)'|([^;\\s]+))/i.exec(contentType);
+    const charset = /(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i.exec(contentType);
     const label = charset?.[1] || charset?.[2] || charset?.[3] || "utf-8";
     let decoder: TextDecoder;
     try {
