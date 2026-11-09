@@ -67,6 +67,7 @@ test("the compiled standalone WASM engine rewrites ordinary JS expressions", () 
     ["let x = 10 / 2;", "let x = 10 / 2;"],
     ["const m = import('./x.js');", "const m = $import(\"https://example.com/\",'./x.js');"],
     ["eval('window.location');", "eval($rewrite('window.location'));"],
+    ["eval(location, top)", "eval($rewrite($wrap(location)), $wrap(top))"],
     ["window.postMessage('x');", "$postMessage(window).postMessage('x');"],
     ["location = top;", '((t)=>$tryset(location,"=",t)||(location=t))(  $wrap(top));'],
   ];
@@ -135,7 +136,7 @@ test("unsupported syntax is rejected, not passed through", () => {
     "function f({location}){return location}",
     "location += '/path';",
     "import x from 'lib';",
-    "eval(location, top)",
+    "eval(...args)",
     "obj.foo.postMessage('hello')",
   ];
   for (const source of invalid) {
