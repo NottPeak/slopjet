@@ -61,7 +61,7 @@ fn create_output(source: &str) -> Result<JsRewriterOutput, JsValue> {
     Ok(JsRewriterOutput::from(JsValue::from(obj)))
 }
 
-fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str) -> Result<JsRewriterOutput, JsValue> {
+fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str, module: bool) -> Result<JsRewriterOutput, JsValue> {
     unsupported_flags(flags)?;
     let mut engine = SemanticProgram::new(
         get_str(jsconfig, "wrapfn")?,
@@ -73,7 +73,7 @@ fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str) -> Resul
         get_str(jsconfig, "rewritefn")?,
         get_str(jsconfig, "wrappostmessagefn")?,
         base,
-    );
+    ).with_module_meta(get_str(jsconfig, "metafn")?, module);
     engine.write(source);
     let rewritten = engine.finish().ok_or_else(|| {
         JsValue::from_str(
@@ -99,9 +99,9 @@ impl Rewriter {
         js: String,
         base: String,
         _url: String,
-        _module: bool,
+        module: bool,
     ) -> Result<JsRewriterOutput, JsValue> {
-        rewrite(jsconfig, jsflags, &js, &base)
+        rewrite(jsconfig, jsflags, &js, &base, module)
     }
 
     pub fn rewrite_js_bytes(
@@ -112,11 +112,11 @@ impl Rewriter {
         js: Vec<u8>,
         base: String,
         _url: String,
-        _module: bool,
+        module: bool,
     ) -> Result<JsRewriterOutput, JsValue> {
         let source = String::from_utf8(js)
             .map_err(|error| JsValue::from_str(&format!("invalid UTF-8: {error}")))?;
-        rewrite(jsconfig, jsflags, &source, &base)
+        rewrite(jsconfig, jsflags, &source, &base, module)
     }
 }
 
@@ -139,11 +139,14 @@ impl PerftestRewriteSession {
         rewritefn: String,
         postmessagefn: String,
         base: String,
+        metafn: String,
+        module: bool,
     ) -> PerftestRewriteSession {
         PerftestRewriteSession {
             scanner: Some(SemanticProgram::new(
                 wrapfn, propertybase, propertyfn, disable_computed_wrap
-            ).with_helpers(importfn, rewritefn, postmessagefn, base)),
+            ).with_helpers(importfn, rewritefn, postmessagefn, base)
+             .with_module_meta(metafn, module)),
         }
     }
 
