@@ -32,3 +32,20 @@ jobs:
         with:
           node-version: '22'
       - run: node --test experiments/perftest/*.test.mjs
+
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck core declarations (report diagnostics)
+        continue-on-error: true
+        run: pnpm --dir packages/core exec tsc -p tsconfig.types.json --pretty false
+      - name: Typecheck controller declarations (report diagnostics)
+        continue-on-error: true
+        run: pnpm --dir packages/controller exec tsc -p tsconfig.types.json --pretty false
