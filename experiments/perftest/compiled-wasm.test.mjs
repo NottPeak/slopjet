@@ -45,7 +45,7 @@ function stream(source, n = 1) {
   const engine = new wasm.PerftestRewriteSession(
     cfg.wrapfn, cfg.wrappropertybase, cfg.wrappropertyfn, false,
     cfg.importfn, cfg.rewritefn, cfg.wrappostmessagefn, "https://example.com/",
-    cfg.metafn, false
+    cfg.metafn, false, cfg.trysetfn
   );
   try {
     for (let i = 0; i < source.length; i += n) {
@@ -68,6 +68,7 @@ test("the compiled standalone WASM engine rewrites ordinary JS expressions", () 
     ["const m = import('./x.js');", "const m = $import(\"https://example.com/\",'./x.js');"],
     ["eval('window.location');", "eval($rewrite('window.location'));"],
     ["window.postMessage('x');", "$postMessage(window).postMessage('x');"],
+    ["location = top;", '((t)=>$tryset(location,"=",t)||(location=t))(  $wrap(top));'],
   ];
   for (const [source, expected] of cases) {
     assert.equal(rewrite(source), expected, source);
