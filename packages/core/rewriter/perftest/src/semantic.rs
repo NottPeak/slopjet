@@ -745,7 +745,14 @@ impl SemanticProgram {
             // Logical assignments (&&=, ||=, ??=) must short-circuit before
             // evaluating the RHS and are intentionally not recognized here.
             if w == "location" && !self.trysetfn.is_empty()
-                && (i == 0 || self.is(i-1, ";") || self.is(i-1, "{")) {
+                && (i == 0 || self.is(i-1, ";") || self.is(i-1, "{"))
+                // Only a bare binding target can use tryset. A member
+                // expression such as location.hash = "x" has its own
+                // setter and must not be mistaken for a compound assignment.
+                && !matches!(
+                    self.tokens.get(i+1).map(|_| self.word(i+1)),
+                    Some("." | "[" | "(" | "?")
+                ) {
                 let mut op_end = i+1;
                 let mut op = String::new();
                 while op_end < n && op_end <= i+4 && !self.is(op_end, "=") {
