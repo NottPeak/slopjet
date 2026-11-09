@@ -692,32 +692,54 @@ impl SemanticProgram {
             }
             // Standalone location assignments use the proxy's dedicated
             // setter helper. RHS evaluation occurs once inside the wrapper.
-            if w == "location" && self.is(i+1, "=") && !self.trysetfn.is_empty()
-                && (i == 0 || self.is(i-1, ";") || self.is(i-1, "{"))
-                && i+2 < n && !self.is(i+2, "=") && !self.is(i+2, ">") {
-                // A simple statement can have an entire RHS expression, not
-                // only one token. Scan to its top-level terminating semicolon
-                // or block end while skipping balanced nested expressions.
-                // We do not guess about ASI or unparenthesized comma operators.
-                let mut end = i+2;
-                while end < n && !self.is(end, ";") && !self.is(end, "}") {
-                    if self.is(end, ",") || self.is(end, ")") || self.is(end, "]") {
+            // Standalone protected-location assignments use the proxy's
+            // setter helper. Arithmetic/bitwise compound assignments preserve
+            // the original operator and evaluate the RHS exactly once.
+            //
+            // Logical assignments (&&=, ||=, ??=) must short-circuit before
+            // evaluating the RHS and are intentionally not recognized here.
+            if w == "location" && !self.trysetfn.is_empty()
+                && (i == 0 || self.is(i-1, ";") || self.is(i-1, "{")) {
+                let mut op_end = i+1;
+                let mut op = String::new();
+                while op_end < n && op_end <= i+4 && !self.is(op_end, "=") {
+                    op.push_str(self.word(op_end));
+                    op_end += 1;
+                }
+                if op_end < n && self.is(op_end, "=") && op_end+1 < n {
+                    let valid_op = matches!(op.as_str(), "" | "+" | "-" | "*" |
+                        "/" | "%" | "&" | "|" | "^" | "<<" | ">>" |
+                        ">>>" | "**");
+                    if !valid_op || self.is(op_end+1, "=") ||
+                        self.is(op_end+1, ">") {
                         return None;
                     }
-                    if matches!(self.word(end), "(" | "[" | "{") {
-                        end = pairs[end]? + 1;
-                    } else { end += 1; }
+                    let mut end = op_end+1;
+                    while end < n && !self.is(end, ";") && !self.is(end, "}") {
+                        if self.is(end, ",") || self.is(end, ")") ||
+                            self.is(end, "]") { return None; }
+                        if matches!(self.word(end), "(" | "[" | "{") {
+                            end = pairs[end]? + 1;
+                        } else { end += 1; }
+                    }
+                    if end == op_end+1 { return None; }
+                    let rhs = &self.source[self.tokens[op_end+1].start..
+                        self.tokens[end-1].end];
+                    // Without a complete ASI model, line-separated assignments
+                    // must use the conservative rejection path.
+                    if rhs.contains('\n') || rhs.contains('\r') { return None; }
+                    let operator = format!("{}=", op);
+                    patch(&mut patches, i).replace = Some(format!(
+                        "((t)=>{}(location,\"{}\",t)||(location{}t))(",
+                        self.trysetfn, operator, operator
+                    ));
+                    for operator_index in i+1..=op_end {
+                        patch(&mut patches, operator_index).replace =
+                            Some(String::new());
+                    }
+                    patch(&mut patches, end-1).after.push(')');
+                    continue;
                 }
-                if end == i+2 { return None; }
-                let rhs = &self.source[self.tokens[i+2].start..self.tokens[end-1].end];
-                if rhs.contains('\n') || rhs.contains('\r') { return None; }
-                patch(&mut patches, i).replace = Some(format!(
-                    "((t)=>{}(location,\"=\",t)||(location=t))(",
-                    self.trysetfn
-                ));
-                patch(&mut patches, i+1).replace = Some(String::new());
-                patch(&mut patches, end-1).after.push(')');
-                continue;
             }
             if (self.is(i+1, "=") && !self.is(i+2, "=") && !self.is(i+2, ">")) ||
                 (i > 1 && (
