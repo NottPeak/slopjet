@@ -44,13 +44,20 @@ fn runway_encoding_script_is_rewritable() {
 
 #[test]
 fn isolate_emit_binding_construct() {
-    for (label, src) in [
+    let cases = [
         ("empty", "function emitBinding(name, payload) {}"),
-        ("var", "function emitBinding(name, payload) { var fn = globalThis[name]; }"),
+        ("local-number", "function emitBinding(name,payload) { var fn = 1; }"),
+        ("local-ident", "function emitBinding(name,payload) { var fn = globalThis; }"),
+        ("local-static-member", "function emitBinding(name,payload) { var fn = globalThis.name; }"),
+        ("local-computed-member", "function emitBinding(name,payload) { var fn = globalThis[name]; }"),
+        ("bare-computed-member", "globalThis[name];"),
+        ("bare-var-computed-member", "var fn = globalThis[name];"),
+        ("bare-function-computed-member", "function emitBinding(name,payload) {globalThis[name];}"),
         ("if", "function emitBinding(name, payload) { var fn = globalThis[name]; if (typeof fn === 'function') {} }"),
         ("call", "function emitBinding(name, payload) { var fn = globalThis[name]; if (typeof fn === 'function') { fn(JSON.stringify(payload)); } }"),
-        ("exact", "function emitBinding(name, payload) {\n\tvar fn = globalThis[name];\n\tif (typeof fn === 'function') {\n\t\tfn(JSON.stringify(payload));\n\t}\n}"),
-    ] {
-        assert!(analyze(src).is_some(), "variant: {label}");
-    }
+    ];
+    let failures: Vec<_> = cases.iter().filter_map(|(label,src)| {
+        if analyze(src).is_none() {Some(*label)} else {None}
+    }).collect();
+    assert!(failures.is_empty(), "unsupported variants: {failures:?}");
 }
