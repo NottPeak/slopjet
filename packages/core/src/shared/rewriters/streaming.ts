@@ -33,6 +33,8 @@ export async function rewriteJsResponse(
         rewritefn: context.config.globals.rewritefn,
         postmessagefn: context.config.globals.wrappostmessagefn,
         base: meta.base.href,
+        metafn: context.config.globals.metafn,
+        module: isModule,
     };
     const parallel = context.interface.rewriteJsFastAsync;
     if (parallel) {
@@ -48,7 +50,8 @@ export async function rewriteJsResponse(
     const session = createPerftestRewriteSession(
         options.wrapfn, options.propertybase,
         options.propertyfn, options.disableComputedWrap,
-        options.importfn, options.rewritefn, options.postmessagefn, options.base
+        options.importfn, options.rewritefn, options.postmessagefn, options.base,
+        options.metafn, options.module
     );
     if (!session) {
         throw new Error("Slopjet scanner WASM not available; refusing unrewritten JS");
