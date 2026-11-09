@@ -518,7 +518,7 @@ impl SemanticProgram {
                 return None;
             }
             if w == "eval" && self.is(i+1, "(") &&
-                (i==0 || !self.is(i-1, ".")) {
+                (i==0 || (!self.is(i-1, ".") && !self.is(i-1, "new"))) {
                 if scopes.shadowed(i, "eval") { continue; }
                 if self.rewritefn.is_empty() { return None; }
                 let end = pairs[i+1]?;
