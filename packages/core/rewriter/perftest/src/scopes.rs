@@ -198,7 +198,13 @@ impl ScopeIndex {
         if open >= 2 && words[open-2] == "function" { return true; }
         if open >= 3 && words[open-3] == "function" { return true; }
         // Bare method names are allowed only in brace/object contexts.
-        // The grammar gate independently rejects unsupported class syntax.
+        // Accessors and async methods have an extra contextual keyword before
+        // the name, but still create function-local bindings.
+        if open >= 3 &&
+            matches!(words[open-2], "get" | "set" | "async") &&
+            matches!(words[open-3], "{" | "," | ";" | "}") {
+            return true;
+        }
         open >= 2 && matches!(words[open-2], "{" | "," | ";" | "}")
     }
 
