@@ -73,7 +73,8 @@ fn rewrite(jsconfig: &Object, flags: &Object, source: &str, base: &str, module: 
         get_str(jsconfig, "rewritefn")?,
         get_str(jsconfig, "wrappostmessagefn")?,
         base,
-    ).with_module_meta(get_str(jsconfig, "metafn")?, module);
+    ).with_module_meta(get_str(jsconfig, "metafn")?, module)
+     .with_assignment(get_str(jsconfig, "trysetfn")?);
     engine.write(source);
     let rewritten = engine.finish().ok_or_else(|| {
         JsValue::from_str(
@@ -141,12 +142,14 @@ impl PerftestRewriteSession {
         base: String,
         metafn: String,
         module: bool,
+        trysetfn: String,
     ) -> PerftestRewriteSession {
         PerftestRewriteSession {
             scanner: Some(SemanticProgram::new(
                 wrapfn, propertybase, propertyfn, disable_computed_wrap
             ).with_helpers(importfn, rewritefn, postmessagefn, base)
-             .with_module_meta(metafn, module)),
+             .with_module_meta(metafn, module)
+             .with_assignment(trysetfn)),
         }
     }
 
