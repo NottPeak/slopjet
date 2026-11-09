@@ -236,9 +236,8 @@ impl SemanticProgram {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
             if matches!(w, "export" | "with" | "class") { return false; }
-            if w == "import" && !(self.is(i+1, "(") || (i>0 && self.is(i-1, "."))) {
-                return false;
-            }
+            // import.meta and static imports need URL transformation.
+            if w == "import" && !self.is(i+1, "(") { return false; }
             if matches!(w, "var" | "let" | "const") {
                 // Detect all binding names, including later comma-separated
                 // declarators. Nested initializer expressions are skipped.
@@ -339,7 +338,7 @@ impl SemanticProgram {
                 continue;
             }
 
-            if w == "eval" && self.is(i+1, "(") {
+            if w == "eval" && self.is(i+1, "(") && !(i>0 && self.is(i-1, ".")) {
                 if self.rewritefn.is_empty() { return None; }
                 let end = pairs[i+1]?;
                 if end > i+2 {
@@ -367,6 +366,10 @@ impl SemanticProgram {
             }
 
             if !unsafe_name(w) { continue; }
+            // Object literal methods are property keys, not bare references.
+            if i>0 && (self.is(i-1, "{") || self.is(i-1, ",")) && self.is(i+1, "(") {
+                return None;
+            }
             if i>0 && self.is(i-1, ".") {
                 patch(&mut patches, i).replace = Some(format!("{}{}", self.propertybase, w));
                 continue;
@@ -524,6 +527,15 @@ mod tests {
         assert!(rewrite_with_helpers("import('./x',{with:{type:'json'}})").is_none());
     }
 
+    #[test]
+    fn rejects_member_eval_module_meta_and_method_property_ambiguity() {
+        assert!(rewrite("const x = import.meta.url;", 40).is_none());
+        assert!(rewrite("const obj = {location(){return 1}};", 50).is_none());
+        let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
+            .with_helpers("$import", "$rewrite", "$post", "https://example.test/");
+        engine.write("window.eval('x')");
+        assert_eq!(engine.finish(), Some("window.$prop$eval('x')".into()));
+    }
     #[test]
     fn fails_closed() {
         for s in [
