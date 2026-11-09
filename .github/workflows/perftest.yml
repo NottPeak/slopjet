@@ -55,7 +55,7 @@ jobs:
       - name: Typecheck core declarations
         run: pnpm --dir packages/core exec tsc -p tsconfig.types.json --pretty false
       - name: Typecheck controller declarations
-        run: pnpm --dir packages/controller exec tsc -p tsconfig.types.json --pretty false
+        run: pnpm --dir packages/core exec tsc -p ../controller/tsconfig.types.json --pretty false
 
   compiled-wasm:
     runs-on: ubuntu-latest
