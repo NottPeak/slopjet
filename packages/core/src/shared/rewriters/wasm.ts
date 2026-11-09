@@ -81,7 +81,9 @@ export function createPerftestRewriteSession(
     importfn: string,
     rewritefn: string,
     postmessagefn: string,
-    base: string
+    base: string,
+    metafn: string,
+    module: boolean
 ): PerftestRewriteSessionLike | null {
     const exports = WasmExports as unknown as {
         PerftestRewriteSession?: new (
@@ -92,11 +94,13 @@ export function createPerftestRewriteSession(
             importfn: string,
             rewritefn: string,
             postmessagefn: string,
-            base: string
+            base: string,
+            metafn: string,
+            module: boolean
         ) => PerftestRewriteSessionLike
     };
     const Constructor = exports.PerftestRewriteSession;
     if (typeof Constructor !== "function") return null;
     initWasm();
-    return new Constructor(wrapfn, propertybase, propertyfn, disableComputedWrap, importfn, rewritefn, postmessagefn, base);
+    return new Constructor(wrapfn, propertybase, propertyfn, disableComputedWrap, importfn, rewritefn, postmessagefn, base, metafn, module);
 }
