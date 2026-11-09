@@ -214,6 +214,8 @@ export type PerftestWorkerPool = {
             rewritefn: string;
             postmessagefn: string;
             base: string;
+            metafn: string;
+            module: boolean;
         };
     }): Promise<string>;
 };
