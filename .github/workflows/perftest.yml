@@ -82,3 +82,5 @@ jobs:
           path: packages/core/rewriter/wasm/out/**
       - name: Run browser-facing WASM contract tests
         run: node --test experiments/perftest/compiled-wasm.test.mjs
+      - name: Benchmark compiled WASM request-level worker scaling
+        run: node experiments/perftest/node-wasm-bench.mjs 60
