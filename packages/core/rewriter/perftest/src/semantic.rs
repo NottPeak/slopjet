@@ -94,6 +94,13 @@ impl SemanticProgram {
                         self.cursor += 1; self.mode = Mode::BlockComment; self.prev_star = false;
                     } else if self.regex_possible() {
                         self.mode = Mode::Regex; self.escaped = false; self.in_class = false;
+                    } else if self.tokens.last().is_some_and(|t|
+                        matches!(&self.source[t.start..t.end], ")" | "}")
+                    ) {
+                        // Slash after a closing control condition may begin
+                        // a regexp statement, but after a call it is division.
+                        // Without grammar context, reject rather than corrupt.
+                        self.unsupported = true;
                     } else { self.emit(Kind::Punct); }
                 }
                 Mode::Regex => {
@@ -146,7 +153,7 @@ impl SemanticProgram {
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
             let w = self.word(i);
-            if matches!(w, "import" | "export" | "with") { return false; }
+            if matches!(w, "import" | "export" | "with" | "class") { return false; }
             if matches!(w, "var" | "let" | "const" | "class") {
                 if i+1 < n && unsafe_name(self.word(i+1)) { return false; }
                 if self.is(i+1, "{") || self.is(i+1, "[") {
@@ -214,10 +221,20 @@ impl SemanticProgram {
                 "var" | "let" | "const" | "function" | "class" | "new") {
                 return None;
             }
-            if self.is(i+1, "=") && !self.is(i+2, "=") && !self.is(i+2, ">") ||
-                self.is(i+1, "+") && (self.is(i+2, "+") || self.is(i+2, "=")) ||
-                self.is(i+1, "-") && (self.is(i+2, "-") || self.is(i+2, "=")) {
+            if (self.is(i+1, "=") && !self.is(i+2, "=") && !self.is(i+2, ">")) ||
+                (i > 1 && (
+                    self.is(i-1, "+") && self.is(i-2, "+") ||
+                    self.is(i-1, "-") && self.is(i-2, "-") ||
+                    self.is(i-1, "delete")
+                )) {
                 return None;
+            }
+            // Any compound assignment or update is an unsafe binding target.
+            for op in ["+", "-", "*", "/", "%", "|", "&", "^", "<", ">", "?"] {
+                if self.is(i+1, op) && (
+                    self.is(i+2, "=") || self.is(i+2, op) &&
+                    (self.is(i+3, "=") || op == "+" || op == "-")
+                ) { return None; }
             }
             if w == "eval" && self.is(i+1, "(") { return None; }
             if self.is(i+1, ":") { return None; }
@@ -237,6 +254,10 @@ impl SemanticProgram {
                 if !member { continue; }
                 let numeric = i+2 == end && self.tokens[i+1].kind == Kind::Number;
                 let text = self.word(i+1);
+                // Escaped spelling can resolve to a protected property at
+                // runtime (e.g. a Unicode escape spelling of 'location').
+                if i+2 == end && self.tokens[i+1].kind == Kind::Literal &&
+                    text.contains('\\') { return None; }
                 let plain_string = i+2 == end && self.tokens[i+1].kind == Kind::Literal &&
                     !unsafe_name(text.trim_matches(&['"', '\''][..]));
                 if numeric || plain_string { continue; }
