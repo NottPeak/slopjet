@@ -393,6 +393,31 @@ impl SemanticProgram {
             }
         }
         if !stack.is_empty() || !self.grammar_safe() { return None; }
+        // Explicitly reject access to unvirtualized Function constructors
+        // through a privileged realm reference. These can compile attacker-
+        // supplied source with a separate realm's native compiler and bypass
+        // the Rust rewrite path. This is a security gate, not a rewrite.
+        for i in 0..n {
+            if !matches!(self.word(i), "top" | "parent" | "window" | "self" | "globalThis") {
+                continue;
+            }
+            if self.is(i+1, ".") && matches!(
+                self.tokens.get(i+2).map(|_| self.word(i+2)),
+                Some("Function" | "constructor")
+            ) {
+                return None;
+            }
+            if self.is(i+1, "[") {
+                let end = pairs[i+1]?;
+                if i+3 == end && self.tokens[i+2].kind == Kind::Literal {
+                    let name = self.word(i+2).trim_matches(&['"', '\''][..]);
+                    if matches!(name, "Function" | "constructor" | "__proto__")
+                        || name.contains('\\') {
+                        return None;
+                    }
+                }
+            }
+        }
         let words: Vec<&str> = (0..n).map(|i| self.word(i)).collect();
         let is_word: Vec<bool> = self.tokens.iter().map(|t| t.kind == Kind::Word).collect();
         let scopes = crate::scopes::ScopeIndex::new(&words, &is_word, &pairs)?;
@@ -1121,6 +1146,21 @@ mod tests {
             .with_limits(Limits { source_bytes: 100, tokens: 100, nesting: 1 });
         engine.write("((top))");
         assert!(engine.finish().is_none());
+    }
+    #[test]
+    fn blocks_privileged_function_constructor_escapes() {
+        for source in [
+            "new top.Function('return this')();",
+            "new parent.Function('return top')();",
+            "top.constructor.constructor('return this')();",
+            "window['Function']('return this')();",
+            "parent[\"constructor\"][\"constructor\"]('return this')();",
+            "globalThis.__proto__.constructor('return this')();",
+        ] {
+            assert!(rewrite(source, source.len()).is_none(), "{source:?}");
+        }
+        assert!(rewrite("top.location.href;", 100).is_some());
+        assert!(rewrite("window['location'];", 100).is_some());
     }
     #[test]
     fn fails_closed() {
