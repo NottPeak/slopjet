@@ -94,7 +94,7 @@ test("unsupported syntax is rejected, not passed through", () => {
   const invalid = [
     "const location = 5;",
     "function f(location){return location}",
-    "location = '/path';",
+    "location += '/path';",
     "import x from 'lib';",
     "eval(location, top)",
     "obj.foo.postMessage('hello')",
