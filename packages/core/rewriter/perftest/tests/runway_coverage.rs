@@ -66,31 +66,31 @@ fn isolate_emit_binding_construct() {
 #[test]
 fn location_runway_scripts_are_semantically_supported() {
     for (name, js) in [
-        ("hash", r#"runTest(async () => {
+        ("hash", r##"runTest(async () => {
             location.hash = "start";
             assertEqual(location.hash, "#start", "precondition");
             location.hash = "target";
             await new Promise((r) => setTimeout(r, 300));
             assertEqual(location.hash, "#target", "after");
             location.hash = "";
-        }, true);"#),
-        ("stringify", r#"runTest(async () => {
+        }, true);"##),
+        ("stringify", r##"runTest(async () => {
             assertEqual(location.toString(), location.href);
             assertEqual(String(location), location.href);
             assertEqual([location].join(), location.href);
-        }, true);"#),
-        ("identity", r#"runTest(async () => {
+        }, true);"##),
+        ("identity", r##"runTest(async () => {
             assertEqual(window.location, location);
             assertEqual(document.location, location);
             assertEqual(self.location, location);
             assertEqual(globalThis.location, location);
-        }, true);"#),
-        ("bare-assign", r#"runTest(async () => {
+        }, true);"##),
+        ("bare-assign", r##"runTest(async () => {
             location.hash = "start";
             location = "#target";
             await new Promise((r) => setTimeout(r, 300));
             assertEqual(location.hash, "#target");
-        }, true);"#),
+        }, true);"##),
     ] {
         assert!(analyze(js).is_some(), "Runway location program unsupported: {name}");
     }
@@ -98,16 +98,16 @@ fn location_runway_scripts_are_semantically_supported() {
 #[test]
 fn eval_argument_runway_scripts_are_semantically_supported() {
     for (name, js) in [
-        ("extra", r#"runTest(async () => {
+        ("extra", r##"runTest(async () => {
             assertEqual(eval("1+1", "2+2"), 2);
             assertEqual(eval("1+1",), 2);
-        }, true);"#),
-        ("spread", r#"runTest(async () => {
+        }, true);"##),
+        ("spread", r##"runTest(async () => {
             assertEqual(eval(...["1+1"]), 2);
-        }, true);"#),
-        ("indirect", r#"runTest(async () => {
+        }, true);"##),
+        ("indirect", r##"runTest(async () => {
             assertEqual((0,eval)("1+1", "2+2"), 2);
-        }, true);"#),
+        }, true);"##),
     ] {
         assert!(analyze(js).is_some(), "Runway eval program unsupported: {name}");
     }
