@@ -34,7 +34,8 @@ self.addEventListener("message", async (event) => {
     if (!options) throw new TypeError("missing rewrite options");
     const scanner = new Session(
       options.wrapfn, options.propertybase, options.propertyfn,
-      options.disableComputedWrap
+      options.disableComputedWrap,
+      options.importfn, options.rewritefn, options.postmessagefn, options.base
     );
     try {
       const decoder = new TextDecoder("utf-8", { fatal: true });
