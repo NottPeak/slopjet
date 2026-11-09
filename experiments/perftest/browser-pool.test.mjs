@@ -103,3 +103,24 @@ test("ignores stale messages after a worker has been replaced", async () => {
   assert.equal(await pool.submit(3), 6);
   pool.close();
 });
+
+test("hung workers time out and do not block later users", async () => {
+  let starts = 0;
+  class HangingWorker extends MockWorker {
+    postMessage(request) {
+      if (request.payload === "hang") return;
+      super.postMessage(request);
+    }
+  }
+  const pool = new RequestPool({
+    workers: 1, timeoutMs: 15,
+    workerFactory: () => {
+      starts++;
+      return new HangingWorker();
+    },
+  });
+  await assert.rejects(pool.submit("hang"), /timed out/);
+  assert.equal(await pool.submit(11), 22);
+  assert.ok(starts >= 2, "hung worker should have been replaced");
+  pool.close();
+});
