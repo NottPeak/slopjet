@@ -1,6 +1,6 @@
 import type { BareResponse } from "@mercuryworkshop/proxy-transports";
 import type { ScramjetContext } from "@/shared";
-import type { URLMeta } from "@rewriters/url";
+import { rewriteUrl, type URLMeta } from "@rewriters/url";
 import { createPerftestRewriteSession } from "@rewriters/wasm";
 import { flagEnabled } from "@/shared";
 
@@ -38,14 +38,20 @@ export async function rewriteJsResponse(
         module: isModule,
     };
     const parallel = context.interface.rewriteJsFastAsync;
+    let workerBytes: Uint8Array | null = null;
     if (parallel) {
-        // Workers process independent requests, never parts of one source.
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        const rewritten = await parallel(bytes, options);
-        if (typeof rewritten !== "string") {
-            throw new Error("Unsupported JS in " + (source ?? "(unknown)") + "; module=" + isModule);
+        // A worker may be unable to resolve a module URL using the host's
+        // custom codec. Retry with the SAME Rust scanner locally (never OXC).
+        workerBytes = new Uint8Array(await response.arrayBuffer());
+        try {
+            const rewritten = await parallel(workerBytes.slice(), options);
+            if (typeof rewritten === "string") {
+                return new TextEncoder().encode(rewritten);
+            }
+        } catch {
+            // The local scanner will attempt the same source with full
+            // URL metadata; unsupported syntax still fails closed.
         }
-        return new TextEncoder().encode(rewritten);
     }
 
     const session = createPerftestRewriteSession(
@@ -60,7 +66,9 @@ export async function rewriteJsResponse(
 
     try {
         const decoder = new TextDecoder("utf-8", { fatal: true });
-        if (response.body) {
+        if (workerBytes) {
+            session.write(decoder.decode(workerBytes));
+        } else if (response.body) {
             const reader = response.body.getReader();
             try {
                 while (true) {
@@ -75,7 +83,8 @@ export async function rewriteJsResponse(
         } else {
             session.write(decoder.decode(new Uint8Array(await response.arrayBuffer())));
         }
-        const rewritten = session.finish();
+        const rewritten = session.finish((specifier: string) =>
+            rewriteUrl(specifier, context, meta, { isModule: true }));
         if (typeof rewritten !== "string") {
             throw new Error("Unsupported JavaScript syntax in " + (source ?? "(unknown)"));
         }
