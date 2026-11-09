@@ -37,7 +37,7 @@ const SEC_HEADERS = new _Set([
 	// This needs to be emulated, but for right now it isn't that important of a feature to be worried about
 	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Clear-Site-Data
 	"clear-site-data",
-]) as _Set<string>;
+]) as unknown as _Set<string>;
 
 /**
  * Headers that are actually URLs that need to be rewritten
@@ -46,7 +46,7 @@ const URL_HEADERS = new _Set([
 	"location",
 	"content-location",
 	"referer",
-]) as _Set<string>;
+]) as unknown as _Set<string>;
 
 function rewriteLinkHeader(
 	link: string,
