@@ -714,6 +714,24 @@ impl SemanticProgram {
                         self.is(op_end+1, ">") {
                         return None;
                     }
+                    // The operator must be one contiguous JavaScript token.
+                    // Do not accidentally turn invalid "location + = x"
+                    // into valid rewritten JavaScript or cross comments.
+                    for j in i+1..op_end {
+                        if self.tokens[j].end != self.tokens[j+1].start {
+                            return None;
+                        }
+                    }
+                    let left_gap = &self.source[
+                        self.tokens[i].end..self.tokens[i+1].start
+                    ];
+                    let rhs_gap = &self.source[
+                        self.tokens[op_end].end..self.tokens[op_end+1].start
+                    ];
+                    if left_gap.contains('\n') || left_gap.contains('\r') ||
+                        rhs_gap.contains('\n') || rhs_gap.contains('\r') {
+                        return None;
+                    }
                     let mut end = op_end+1;
                     while end < n && !self.is(end, ";") && !self.is(end, "}") {
                         if self.is(end, ",") || self.is(end, ")") ||
