@@ -71,7 +71,7 @@ test("the compiled standalone WASM engine rewrites ordinary JS expressions", () 
     ["window.postMessage('x');", "$postMessage(window).postMessage('x');"],
     ["obj.foo.postMessage('x');", "$postMessage(obj.foo).postMessage('x');"],
     ["frames[0].postMessage('x');", "$postMessage(frames[0]).postMessage('x');"],
-    ["location = top;", '((t)=>$tryset(location,"=",t)||(location=t))(  $wrap(top));'],
+    ["location = top;", '((t)=>{const v=t;return $tryset(location,"=",v)?v:(location=v)})(  $wrap(top));'],
   ];
   for (const [source, expected] of cases) {
     assert.equal(rewrite(source), expected, source);
