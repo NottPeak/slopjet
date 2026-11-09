@@ -48,6 +48,24 @@ fn js_string(value: &str) -> String {
     out
 }
 
+/// Hard ceilings for per-request memory growth and adversarial source nesting.
+/// Limits are per instance so a hosting service may choose smaller budgets.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub source_bytes: usize,
+    pub tokens: usize,
+    pub nesting: usize,
+}
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            source_bytes: 64 * 1024 * 1024,
+            tokens: 4_000_000,
+            nesting: 4096,
+        }
+    }
+}
+
 pub struct SemanticProgram {
     source: String, tokens: Vec<Token>, cursor: usize, start: usize,
     mode: Mode, escaped: bool, in_class: bool, prev_star: bool,
@@ -56,6 +74,7 @@ pub struct SemanticProgram {
     propertyfn: String, disable_computed: bool,
     importfn: String, rewritefn: String, postmessagefn: String, base: String,
     metafn: String, is_module: bool, trysetfn: String,
+    limits: Limits,
 }
 impl SemanticProgram {
     pub fn new(wrapfn: impl Into<String>, propertybase: impl Into<String>,
@@ -67,7 +86,8 @@ impl SemanticProgram {
             propertyfn: propertyfn.into(), disable_computed,
             importfn: String::new(), rewritefn: String::new(),
             postmessagefn: String::new(), base: String::new(),
-            metafn: String::new(), is_module: false, trysetfn: String::new() }
+            metafn: String::new(), is_module: false, trysetfn: String::new(),
+            limits: Limits::default() }
     }
     pub fn with_helpers(
         mut self, importfn: impl Into<String>, rewritefn: impl Into<String>,
@@ -91,7 +111,18 @@ impl SemanticProgram {
         self
     }
 
+    /// Set resource limits before write(). A zero limit rejects all input
+    /// requiring that resource; it never turns off validation.
+    pub fn with_limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
     fn emit(&mut self, kind: Kind) {
+        if self.tokens.len() >= self.limits.tokens {
+            self.unsupported = true;
+            return;
+        }
         self.tokens.push(Token { start: self.start, end: self.cursor, kind });
         self.mode = Mode::Code;
     }
@@ -134,6 +165,10 @@ impl SemanticProgram {
     }
     pub fn write(&mut self, chunk: &str) {
         if self.unsupported { return; }
+        if chunk.len() > self.limits.source_bytes.saturating_sub(self.source.len()) {
+            self.unsupported = true;
+            return;
+        }
         self.source.push_str(chunk);
         while self.cursor < self.source.len() && !self.unsupported {
             let b = self.source.as_bytes()[self.cursor];
@@ -151,6 +186,10 @@ impl SemanticProgram {
                         self.start = self.cursor; self.cursor += 1; self.mode = Mode::Slash;
                     } else if b == 96 {
                         self.cursor += 1;
+                        if self.templates.len() >= self.limits.nesting {
+                            self.unsupported = true;
+                            return;
+                        }
                         self.templates.push(TemplateFrame { depth: 0, in_expression: false });
                         self.mode = Mode::Template;
                         self.escaped = false;
@@ -343,6 +382,7 @@ impl SemanticProgram {
         let mut stack = Vec::new();
         for i in 0..n {
             if matches!(self.word(i), "(" | "[" | "{") {
+                if stack.len() >= self.limits.nesting { return None; }
                 stack.push(i);
             } else if matches!(self.word(i), ")" | "]" | "}") {
                 let j = stack.pop()?;
@@ -1061,6 +1101,26 @@ mod tests {
         assert_eq!(rewrite("f(...location);", 60), Some("f(...$wrap(location));".into()));
         assert_eq!(rewrite("const o = {...top};", 60),
             Some("const o = {...$wrap(top)};".into()));
+    }
+    #[test]
+    fn enforces_per_request_resource_budgets() {
+        let tight = Limits { source_bytes: 8, tokens: 100, nesting: 32 };
+        let mut engine = SemanticProgram::new("$wrap", "$property", "$computed", false)
+            .with_limits(tight);
+        engine.write("top;");
+        engine.write("top;");
+        engine.write("top;");
+        assert!(engine.finish().is_none());
+
+        let mut engine = SemanticProgram::new("$wrap", "$property", "$computed", false)
+            .with_limits(Limits { source_bytes: 100, tokens: 1, nesting: 32 });
+        engine.write("top;top;");
+        assert!(engine.finish().is_none());
+
+        let mut engine = SemanticProgram::new("$wrap", "$property", "$computed", false)
+            .with_limits(Limits { source_bytes: 100, tokens: 100, nesting: 2 });
+        engine.write("((top))");
+        assert!(engine.finish().is_none());
     }
     #[test]
     fn fails_closed() {
