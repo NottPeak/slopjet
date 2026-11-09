@@ -749,10 +749,18 @@ impl SemanticProgram {
                     // Without a complete ASI model, line-separated assignments
                     // must use the conservative rejection path.
                     if rhs.contains('\n') || rhs.contains('\r') { return None; }
-                    let operator = format!("{}=", op);
+                    // The assignment expression must yield the assigned
+                    // value, not the boolean returned by trysetfn. For
+                    // compound operators, compute the new value exactly
+                    // once and let trysetfn perform the protected write.
+                    let value_expression = if op.is_empty() {
+                        "t".to_string()
+                    } else {
+                        format!("location{}t", op)
+                    };
                     patch(&mut patches, i).replace = Some(format!(
-                        "((t)=>{}(location,\"{}\",t)||(location{}t))(",
-                        self.trysetfn, operator, operator
+                        "((t)=>{{const v={};return {}(location,\"=\",v)?v:(location=v)}})(",
+                        value_expression, self.trysetfn
                     ));
                     for operator_index in i+1..=op_end {
                         patch(&mut patches, operator_index).replace =
