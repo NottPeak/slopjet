@@ -320,6 +320,16 @@ impl SemanticProgram {
             }
         }
         if !stack.is_empty() || !self.binding_safe(&pairs) { return None; }
+        // Object/array destructuring assignment syntax requires independent
+        // property-binding handling, not a normal member-key rewrite.
+        for i in 0..n {
+            if self.is(i, "{") || self.is(i, "[") {
+                let end = pairs[i]?;
+                if self.is(end+1, "=") && !self.is(end+2, "=") {
+                    return None;
+                }
+            }
+        }
         let mut patches: Vec<Option<Patch>> = (0..n).map(|_| None).collect();
         for i in 0..n {
             if self.tokens[i].kind != Kind::Word { continue; }
@@ -393,10 +403,23 @@ impl SemanticProgram {
 
             if !unsafe_name(w) { continue; }
             // Object literal methods are property keys, not bare references.
-            if i>0 && (self.is(i-1, "{") || self.is(i-1, ",")) && self.is(i+1, "(") {
+            if i>0 && (
+                self.is(i-1, "{") || self.is(i-1, ",") ||
+                self.is(i-1, "get") || self.is(i-1, "set") ||
+                self.is(i-1, "async")
+            ) && self.is(i+1, "(") {
                 return None;
             }
             if i>0 && self.is(i-1, ".") {
+                if i>1 && self.is(i-2, ".") {
+                    if i>2 && self.is(i-3, ".") {
+                        patch(&mut patches, i).replace = Some(
+                            format!("{}({})", self.wrapfn, w)
+                        );
+                        continue;
+                    }
+                    return None;
+                }
                 patch(&mut patches, i).replace = Some(format!("{}{}", self.propertybase, w));
                 continue;
             }
@@ -608,6 +631,14 @@ mod tests {
             .with_module_meta("$meta", true);
         engine.write("export {home} from './module.js';");
         assert!(engine.finish().is_none());
+    }
+    #[test]
+    fn object_grammar_and_spread_identifiers() {
+        assert!(rewrite("({location:x}=obj);", 50).is_none());
+        assert!(rewrite("const o={get location(){return 1}};", 60).is_none());
+        assert_eq!(rewrite("f(...location);", 60), Some("f(...$wrap(location));".into()));
+        assert_eq!(rewrite("const o = {...top};", 60),
+            Some("const o = {...$wrap(top)};".into()));
     }
     #[test]
     fn fails_closed() {
