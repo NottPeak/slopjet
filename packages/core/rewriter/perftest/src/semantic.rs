@@ -1043,15 +1043,15 @@ mod tests {
             .with_assignment("$tryset");
         engine.write("location = top;");
         assert_eq!(engine.finish(), Some(
-            "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top));".into()
+            "((t)=>{const v=t;return $tryset(location,\"=\",v)?v:(location=v)})(  $wrap(top));".into()
         ));
         for (source, expected) in [
             ("location = top + '/next';",
-             "((t)=>$tryset(location,\"=\",t)||(location=t))(  $wrap(top) + '/next');"),
+             "((t)=>{const v=t;return $tryset(location,\"=\",v)?v:(location=v)})(  $wrap(top) + '/next');"),
             ("location = Math.max(top, 1);",
-             "((t)=>$tryset(location,\"=\",t)||(location=t))(  Math.max($wrap(top), 1));"),
+             "((t)=>{const v=t;return $tryset(location,\"=\",v)?v:(location=v)})(  Math.max($wrap(top), 1));"),
             ("location = (top + parent);",
-             "((t)=>$tryset(location,\"=\",t)||(location=t))(  ($wrap(top) + $wrap(parent)));"),
+             "((t)=>{const v=t;return $tryset(location,\"=\",v)?v:(location=v)})(  ($wrap(top) + $wrap(parent)));"),
         ] {
             let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
                 .with_assignment("$tryset");
@@ -1068,12 +1068,12 @@ mod tests {
     #[test]
     fn compound_location_assignment_preserves_operator_and_rhs_evaluation() {
         for (source, expected) in [
-            ("location += top;", "((t)=>$tryset(location,\"+=\",t)||(location+=t))(  $wrap(top));"),
-            ("location -= 2;", "((t)=>$tryset(location,\"-=\",t)||(location-=t))(  2);"),
-            ("location *= top;", "((t)=>$tryset(location,\"*=\",t)||(location*=t))(  $wrap(top));"),
-            ("location <<= parent;", "((t)=>$tryset(location,\"<<=\",t)||(location<<=t))(  $wrap(parent));"),
-            ("location **= top;", "((t)=>$tryset(location,\"**=\",t)||(location**=t))(  $wrap(top));"),
-            ("location+=top;", "((t)=>$tryset(location,\"+=\",t)||(location+=t))($wrap(top));"),
+            ("location += top;", "((t)=>{const v=location+t;return $tryset(location,\"=\",v)?v:(location=v)})(  $wrap(top));"),
+            ("location -= 2;", "((t)=>{const v=location-t;return $tryset(location,\"=\",v)?v:(location=v)})(  2);"),
+            ("location *= top;", "((t)=>{const v=location*t;return $tryset(location,\"=\",v)?v:(location=v)})(  $wrap(top));"),
+            ("location <<= parent;", "((t)=>{const v=location<<t;return $tryset(location,\"=\",v)?v:(location=v)})(  $wrap(parent));"),
+            ("location **= top;", "((t)=>{const v=location**t;return $tryset(location,\"=\",v)?v:(location=v)})(  $wrap(top));"),
+            ("location+=top;", "((t)=>{const v=location+t;return $tryset(location,\"=\",v)?v:(location=v)})($wrap(top));"),
         ] {
             let mut engine = SemanticProgram::new("$wrap", "$prop$", "$compute", false)
                 .with_assignment("$tryset");
