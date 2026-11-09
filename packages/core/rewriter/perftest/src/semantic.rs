@@ -589,8 +589,15 @@ impl SemanticProgram {
             // Bindings discovered later in the same scope shadow this name.
             if scopes.declaration(i) || scopes.shadowed(i, w) { continue; }
             if i>0 && self.is(i-1, "#") { continue; }
+            // A bare protected constructor target already has grouping
+            // inserted by the preceding "new" token. Allow the identifier
+            // wrapper here, but continue rejecting longer/new-member
+            // expressions until their full callee span is known.
+            if i>0 && self.is(i-1, "new") && !self.is(i+1, "(") {
+                return None;
+            }
             if i>0 && matches!(self.word(i-1),
-                "var" | "let" | "const" | "function" | "class" | "new") {
+                "var" | "let" | "const" | "function" | "class") {
                 return None;
             }
             // Standalone location assignments use the proxy's dedicated
