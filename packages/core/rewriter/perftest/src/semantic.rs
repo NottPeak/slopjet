@@ -464,15 +464,37 @@ impl SemanticProgram {
             }
 
             if w == "postMessage" && i>0 && self.is(i-1, ".") {
-                if self.postmessagefn.is_empty() || i<2 ||
-                    self.tokens[i-2].kind != Kind::Word ||
-                    i>2 && self.is(i-3, ".") ||
-                    self.is(i-2, "super") {
+                // Wrap the complete receiver expression, never just the
+                // final property in a chain. The helper binds postMessage
+                // to its actual owner and preserves optional null checks.
+                if self.postmessagefn.is_empty() || i<2 { return None; }
+                if self.is(i+1, "=") || self.is(i+1, "+") ||
+                    self.is(i+1, "-") { return None; } // method assignment
+                let optional = i>1 && self.is(i-2, "?");
+                let receiver_end = if optional { i.checked_sub(3)? } else { i-2 };
+                let mut start = receiver_end;
+                if self.tokens[start].kind != Kind::Word {
+                    if self.is(start, "]") || self.is(start, ")") {
+                        let open = pairs[start]?;
+                        start = if open>0 && self.tokens[open-1].kind == Kind::Word {
+                            open-1
+                        } else { open };
+                    } else { return None; }
+                }
+                while start >= 2 && self.is(start-1, ".") &&
+                    self.tokens[start-2].kind == Kind::Word {
+                    start -= 2;
+                }
+                if start>0 && self.is(start-1, ".") ||
+                    start>0 && self.is(start-1, "?") ||
+                    start>0 && self.is(start-1, "new") ||
+                    self.is(start, "super") {
                     return None;
                 }
-                let before = format!("{}(", self.postmessagefn);
-                patch(&mut patches, i-2).before.insert_str(0, &before);
-                patch(&mut patches, i-2).after.push(')');
+                patch(&mut patches, start).before.insert_str(
+                    0, &format!("{}(", self.postmessagefn)
+                );
+                patch(&mut patches, receiver_end).after.push(')');
                 continue;
             }
 
@@ -758,6 +780,18 @@ mod tests {
         assert!(rewrite_with_helpers("import('./x',{with:{type:'json'}})").is_none());
     }
 
+    #[test]
+    fn postmessage_receiver_is_wrapped_once_across_chains() {
+        assert_eq!(rewrite_with_helpers("frames[0].postMessage('x');"),
+            Some("$post(frames[0]).postMessage('x');".into()));
+        assert_eq!(rewrite_with_helpers("foo.bar.postMessage('x');"),
+            Some("$post(foo.bar).postMessage('x');".into()));
+        assert_eq!(rewrite_with_helpers("foo?.postMessage('x');"),
+            Some("$post(foo)?.postMessage('x');".into()));
+        assert_eq!(rewrite_with_helpers("getTarget().postMessage('x');"),
+            Some("$post(getTarget()).postMessage('x');".into()));
+        assert_eq!(rewrite_with_helpers("foo.postMessage = fn;"), None);
+    }
     #[test]
     fn preserves_direct_eval_with_extra_arguments() {
         assert_eq!(rewrite_with_helpers("eval('x', sideEffect());"),
